@@ -2,74 +2,148 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import type { LucideIcon } from "lucide-react";
-import { Activity, ArrowUpRight, BrainCircuit, CircleDot, Radar, ShieldCheck, Sparkles, Target, TrendingUp, Zap } from "lucide-react";
-import { Confidence, PageIntro } from "@/components/intelligence-ui";
+import {
+  ArrowUp,
+  ArrowUpRight,
+  BarChart3,
+  Building2,
+  ChevronRight,
+  Globe2,
+  Layers3,
+  ShieldCheck,
+  Users,
+} from "lucide-react";
 
-type Metric = { label: string; value: string; note: string; icon: LucideIcon };
-type FormingMove = { move: string; company: string; score: number };
+const signalBars = [72, 84, 95, 132, 108, 118, 102, 122, 138, 145, 178, 164, 128, 138, 165, 156, 205, 244, 188, 174, 205, 240, 212, 198, 220, 238, 257, 287];
 
-const metrics: Metric[] = [
-  { label: "Actionable signals", value: "12", note: "+4 today", icon: Activity },
-  { label: "RADAR Moves", value: "4", note: "2 forming", icon: Radar },
-  { label: "Open decisions", value: "3", note: "1 urgent", icon: BrainCircuit },
-  { label: "Sensor coverage", value: "87%", note: "+6% this week", icon: ShieldCheck },
+const topSignals = [
+  ["Anthropic expands enterprise footprint with new industry verticals", "AI", "2 hours ago", "High"],
+  ["EU advances AI regulatory framework with new oversight body", "Regulation", "4 hours ago", "Medium"],
+  ["Microsoft deepens semiconductor supply partnerships in Asia", "Supply Chain", "6 hours ago", "High"],
+  ["Surge in defense tech funding across Europe", "Venture Capital", "9 hours ago", "Medium"],
 ];
 
-const formingMoves: FormingMove[] = [
-  { move: "Enterprise expansion", company: "LearnSphere", score: 89 },
-  { move: "AI product push", company: "SkillForge", score: 81 },
-  { move: "New geography", company: "EduNova", score: 72 },
+const opportunities = [
+  ["AI Infrastructure Consolidation", "Increase in strategic M&A activity creates partnership and acquisition opportunities.", "High", BarChart3],
+  ["Vertical AI in Healthcare", "Regulatory clarity is accelerating adoption across care providers.", "High", Layers3],
+  ["European Defense Tech Expansion", "Significant funding and policy tailwinds across EU markets.", "Medium", ShieldCheck],
+  ["AI Governance & Risk Tools", "Growing demand for compliance and monitoring solutions.", "Medium", Building2],
+] as const;
+
+const decisions = [
+  ["Evaluate partnership opportunity with Anthropic", "Based on 12 relevant signals"],
+  ["Assess market entry in European defense tech", "Based on 8 relevant signals"],
+  ["Review AI governance tool landscape", "Based on 6 relevant signals"],
 ];
 
-const bars = [28, 36, 31, 49, 41, 56, 52, 71, 63, 81, 76, 92];
-
-function IntelligenceGraph() {
+function MetricCard({ label, value, change, note, icon: Icon }: { label: string; value: string; change?: string; note?: string; icon: typeof BarChart3 }) {
   return (
-    <div className="graph-wrap">
-      <div className="graph-grid" />
-      <svg viewBox="0 0 780 255" preserveAspectRatio="none" className="line-graph" aria-label="Intelligence velocity rising over seven days">
-        <defs><linearGradient id="home-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="currentColor" stopOpacity=".22" /><stop offset="100%" stopColor="currentColor" stopOpacity="0" /></linearGradient></defs>
-        <path className="area-path" d="M0 211 C65 210 78 176 130 181 S205 150 257 159 S339 120 388 132 S466 94 522 105 S604 61 654 74 S728 34 780 43 L780 255 L0 255 Z" fill="url(#home-area)" />
-        <motion.path d="M0 211 C65 210 78 176 130 181 S205 150 257 159 S339 120 388 132 S466 94 522 105 S604 61 654 74 S728 34 780 43" fill="none" className="trend-path" strokeWidth="2.3" initial={{ pathLength: 0, opacity: 0 }} animate={{ pathLength: 1, opacity: 1 }} transition={{ duration: 1.4 }} />
-      </svg>
-      <div className="graph-labels"><span>04 SEP</span><span>05 SEP</span><span>06 SEP</span><span>07 SEP</span><span>08 SEP</span><span>TODAY</span></div>
-    </div>
+    <article className="ref-metric-card">
+      <div>
+        <span className="ref-label">{label}</span>
+        <div className="ref-metric-line">
+          <strong>{value}</strong>
+          {change ? <span className="ref-change"><ArrowUp size={12} /> {change}</span> : null}
+        </div>
+        {note ? <small>{note}</small> : <small>vs. last 30 days</small>}
+      </div>
+      <Icon size={33} strokeWidth={1.45} />
+    </article>
   );
 }
 
 export default function Home() {
   return (
-    <div className="content">
-      <PageIntro eyebrow="LIVE INTELLIGENCE · 09 SEP 2026" title="Good evening, Dipanshu." description="Your market moved today. RADAR found 4 developments worth your attention." action={<Link href="/ask" className="primary-button"><Sparkles size={16} /> Ask RADAR</Link>} />
+    <div className="content radar-reference-content">
+      <section className="ref-heading-row">
+        <div>
+          <h1>Good evening, Dipanshu.</h1>
+          <p>Actionable intelligence for what’s next.</p>
+        </div>
+        <div className="ref-heading-meta">
+          <span>PEOPLE</span><i>/</i><span>SIGNALS</span><i>/</i><span>INSIGHTS</span><i>/</i><span>ACTION</span>
+          <b />
+          <em>A<br />CLEARER<br />TOMORROW</em>
+        </div>
+      </section>
 
-      <section className="hero-grid">
-        <motion.article className="priority-card" initial={{ opacity: 0, scale: .98 }} animate={{ opacity: 1, scale: 1 }}>
-          <div className="priority-topline"><span className="priority-label"><Zap size={14} /> HIGH PRIORITY MOVE</span><span className="confidence">91% confidence</span></div>
-          <h2>A competitor appears to be preparing an enterprise expansion.</h2>
-          <p>Hiring, pricing, compliance and product changes now point in the same direction. This is no longer a weak signal.</p>
-          <div className="evidence-row"><div><strong>5</strong><span>corroborating changes</span></div><div><strong>High</strong><span>potential impact</span></div><div><strong>3d</strong><span>pattern forming</span></div></div>
-          <div className="recommendation"><div className="recommendation-icon"><Target size={18} /></div><div><span>RADAR RECOMMENDS</span><p>Accelerate school-pilot case studies before enterprise competitors establish institutional proof.</p></div><Link href="/moves/enterprise-expansion"><ArrowUpRight size={17} /></Link></div>
-        </motion.article>
+      <section className="ref-metric-grid">
+        <MetricCard label="TOTAL SIGNALS" value="1,248" change="12%" icon={BarChart3} />
+        <MetricCard label="KEY OPPORTUNITIES" value="24" change="33%" icon={Layers3} />
+        <MetricCard label="COMPETITORS TRACKED" value="87" change="6%" icon={Users} />
+        <MetricCard label="MARKETS MONITORED" value="12" note="No change" icon={Globe2} />
+      </section>
 
-        <article className="brain-card">
-          <div className="card-heading"><div><span className="card-icon"><BrainCircuit size={17} /></span><div><strong>Company Brain</strong><small>Understanding ReadRight</small></div></div><span className="status-chip">HEALTHY</span></div>
-          <div className="brain-score"><Confidence value={94} /><div><strong>Deep context</strong><span>RADAR has high confidence in your company model.</span></div></div>
-          <div className="brain-stats"><div><span>Tracked entities</span><strong>37</strong></div><div><span>Watch targets</span><strong>24</strong></div><div><span>Evidence sources</span><strong>68</strong></div></div>
-          <Link href="/brain" className="text-button">Open Company Brain <ArrowUpRight size={14} /></Link>
+      <section className="ref-middle-grid">
+        <article className="ref-hero-card">
+          <div className="ref-hero-overlay">
+            <span className="ref-kicker">MARKET INTELLIGENCE</span>
+            <h2>Change before<br />it’s obvious.</h2>
+            <p>Real-time signals. Deeper context.<br />A clearer edge.</p>
+            <Link href="/signals" className="ref-hero-button">Explore Insights <ArrowUpRight size={15} /></Link>
+          </div>
+          <div className="ref-hero-signal"><span>SIGNALS TODAY</span><strong>+42%</strong><i /><b /></div>
+          <div className="ref-mountain-scene" aria-hidden="true">
+            <span className="ridge r1" /><span className="ridge r2" /><span className="ridge r3" /><span className="ridge r4" />
+          </div>
+          <span className="ref-hero-tag">A CLEARER<br />TOMORROW</span>
+        </article>
+
+        <article className="ref-chart-card">
+          <div className="ref-card-title-row"><strong>SIGNAL VOLUME</strong><span>Last 30 days⌄</span></div>
+          <div className="ref-chart">
+            <div className="ref-chart-y"><span>300</span><span>200</span><span>100</span><span>0</span></div>
+            <div className="ref-chart-grid-lines"><i /><i /><i /><i /></div>
+            <div className="ref-bars">
+              {signalBars.map((v, i) => <motion.span key={i} initial={{ height: 0 }} animate={{ height: `${Math.max(8, v / 3)}%` }} transition={{ delay: i * .018 }} className={i === signalBars.length - 1 ? "active" : ""} />)}
+            </div>
+            <div className="ref-tooltip"><strong>Sep 9, 2026</strong><span>287 signals</span></div>
+          </div>
+          <div className="ref-chart-x"><span>Aug 13</span><span>Aug 20</span><span>Aug 27</span><span>Sep 3</span><span>Sep 9</span></div>
         </article>
       </section>
 
-      <section className="metrics-grid">
-        {metrics.map(({ label, value, note, icon: Icon }) => <article className="metric-card" key={label}><div className="metric-icon"><Icon size={17} /></div><span>{label}</span><strong>{value}</strong><small>{note}</small></article>)}
-      </section>
+      <section className="ref-bottom-grid">
+        <article className="ref-list-card">
+          <div className="ref-card-title-row"><strong>TOP SIGNALS</strong><Link href="/signals">View all <ArrowUpRight size={13} /></Link></div>
+          <div className="ref-signal-list">
+            {topSignals.map(([title, type, time, level], i) => (
+              <Link href="/signals/enterprise-hiring" className="ref-signal-item" key={title}>
+                <div className="ref-thumb"><span className={`thumb-line t${i + 1}`} /></div>
+                <div><strong>{title}</strong><span>{type} <i>•</i> {time}</span></div>
+                <em>{level}</em>
+              </Link>
+            ))}
+          </div>
+        </article>
 
-      <section className="dashboard-grid">
-        <article className="panel trend-panel"><div className="panel-heading"><div><h3>Intelligence velocity</h3><p>Meaningful market change detected over time</p></div></div><div className="trend-number"><strong>+38%</strong><span><TrendingUp size={13} /> vs previous period</span></div><IntelligenceGraph /></article>
-        <article className="panel moves-panel"><div className="panel-heading"><div><h3>Moves forming</h3><p>Patterns RADAR is connecting now</p></div><Link href="/moves" className="ghost-link">View all</Link></div><div className="move-list">{formingMoves.map(({ move, company, score }) => <Link href="/moves/enterprise-expansion" className="move-row" key={move}><div className="move-orbit"><span /></div><div className="move-copy"><strong>{move}</strong><span>{company}</span></div><div className="move-score">{score}%</div></Link>)}</div></article>
-      </section>
+        <article className="ref-list-card">
+          <div className="ref-card-title-row"><strong>KEY OPPORTUNITIES</strong><Link href="/discover">View all <ArrowUpRight size={13} /></Link></div>
+          <div className="ref-opportunity-list">
+            {opportunities.map(([title, desc, level, Icon]) => (
+              <Link href="/discover" className="ref-opportunity-item" key={title}>
+                <span className="ref-op-icon"><Icon size={17} /></span>
+                <div><strong>{title}</strong><p>{desc}</p></div>
+                <em>{level}</em>
+              </Link>
+            ))}
+          </div>
+        </article>
 
-      <section className="panel market-strip"><div className="market-title"><CircleDot size={17} /><div><strong>Market pulse</strong><span>12 meaningful signals detected in the last 24 hours</span></div></div><div className="micro-bars">{bars.map((h, i) => <motion.span key={i} initial={{ height: 0 }} animate={{ height: `${h}%` }} transition={{ delay: .25 + i * .03 }} />)}</div><Link href="/market-map" className="secondary-button">Open market map <ArrowUpRight size={14} /></Link></section>
+        <article className="ref-decision-card">
+          <div className="ref-card-title-row"><strong>STRATEGIC DECISIONS</strong><span className="ref-new-badge">3 NEW</span></div>
+          <div className="ref-decision-list">
+            {decisions.map(([title, note], i) => (
+              <Link href="/decisions" className="ref-decision-item" key={title}>
+                <span>{i + 1}</span>
+                <div><strong>{title}</strong><small>{note}</small></div>
+                <ChevronRight size={17} />
+              </Link>
+            ))}
+          </div>
+          <Link href="/decisions" className="ref-decision-button">View Decision Brief <ArrowUpRight size={14} /></Link>
+        </article>
+      </section>
     </div>
   );
 }
