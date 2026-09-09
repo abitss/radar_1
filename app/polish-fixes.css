@@ -8,7 +8,6 @@
 .radar-reference-main .panel-heading h3,.radar-reference-main .card-heading strong{color:#252a2e!important}
 .radar-reference-main .panel-heading p,.radar-reference-main .card-heading small{color:#747b81!important}
 
-/* kill leftover green / teal from older styles */
 .radar-reference-main .live-dot,
 .radar-reference-main .notification-dot,
 .radar-reference-main .node-pulse,
@@ -32,7 +31,6 @@
 .radar-reference-main .secondary-button{background:#f6f7f8!important;color:#31363a!important;border-color:#d8dcdf!important}
 .radar-reference-main .recommendation{background:#f7f8f9!important;border-color:#dfe3e6!important}
 
-/* contrast insurance */
 .radar-reference-main .ref-metric-card,.radar-reference-main .stat-tile,.radar-reference-main .metric-card,.radar-reference-main .panel,.radar-reference-main .collection-card,.radar-reference-main .simple-card{background:#fff!important;color:#171a1d!important}
 .radar-reference-main .ref-metric-card small,.radar-reference-main .stat-tile small,.radar-reference-main .metric-card small,.radar-reference-main .collection-card p,.radar-reference-main .simple-card p{color:#6f767c!important}
 .radar-reference-main .intel-table-row{color:#171a1d!important;background:#fff!important}
@@ -43,23 +41,18 @@
 .radar-reference-main .ref-hero-card,.radar-reference-main .radar-sidebar-promo{color:#fff!important}
 .radar-reference-main .ref-hero-card h2,.radar-reference-main .ref-hero-card p,.radar-reference-main .ref-hero-card span,.radar-reference-main .ref-hero-card strong{color:#fff!important}
 
-/* full logo: never crop */
 .radar-reference-brand{height:72px!important;padding:6px 6px 18px!important;overflow:visible!important}
 .radar-reference-brand .radar-logo-link{display:block!important;width:100%!important;overflow:visible!important}
 .radar-reference-brand .radar-wordmark{width:176px!important;max-width:100%!important;overflow:visible!important;color:#f7f8f9!important}
 .radar-reference-brand .radar-wordmark svg{width:100%!important;height:auto!important;overflow:visible!important;display:block!important}
 
-/* floating AI launcher */
-.radar-ai-launcher{position:fixed;right:28px;bottom:28px;z-index:80;display:flex;align-items:center;gap:10px;min-width:142px;height:52px;padding:0 15px 0 10px;border-radius:16px;background:#262b2f;color:#fff!important;text-decoration:none;box-shadow:0 14px 34px rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.08);transition:.18s ease}
-.radar-ai-launcher:hover{transform:translateY(-2px);background:#1d2124}
-.radar-ai-launcher.active{background:#171a1d}
-.radar-ai-icon{width:34px;height:34px;border-radius:11px;background:#f2f4f5;display:grid;place-items:center;position:relative;color:#2c3135!important}
-.radar-ai-icon svg:last-child{position:absolute;right:4px;bottom:4px;background:#2c3135;color:#fff;border-radius:50%;padding:1px}
-.radar-ai-copy{display:flex;flex-direction:column;line-height:1.05}
-.radar-ai-copy strong{color:#fff!important;font-size:11px!important;font-weight:550!important}
-.radar-ai-copy small{color:#b9bfc4!important;font-size:8px!important;margin-top:4px}
+/* icon-only Ask RADAR floating action */
+.radar-ai-fab{position:fixed;right:24px;bottom:24px;z-index:90;width:62px;height:62px;display:flex;align-items:center;justify-content:center;border-radius:18px;text-decoration:none;transition:transform .18s ease,box-shadow .18s ease,filter .18s ease}
+.radar-ai-fab:hover{transform:translateY(-2px) scale(1.03);filter:brightness(.98)}
+.radar-ai-fab:active{transform:scale(.97)}
+.radar-ai-fab-image{width:62px;height:62px;display:block;object-fit:contain;border-radius:18px;box-shadow:0 12px 28px rgba(0,0,0,.20)}
+.radar-ai-fab.active .radar-ai-fab-image{box-shadow:0 14px 32px rgba(0,0,0,.25)}
 
-/* make nav + search feel softer */
 .radar-reference-nav .nav-item{border-radius:11px!important}
 .radar-reference-nav .nav-item span{font-weight:450!important;letter-spacing:-.015em!important}
 .radar-reference-search{border-radius:14px!important;background:#fbfcfc!important;color:#6e757a!important}
@@ -67,7 +60,7 @@
 .radar-profile small{color:#747b80!important}
 
 @media(max-width:820px){
-  .radar-ai-launcher{right:16px;bottom:16px;min-width:52px;width:52px;padding:0;justify-content:center;border-radius:15px}
-  .radar-ai-copy{display:none}
+  .radar-ai-fab{right:16px;bottom:16px;width:56px;height:56px}
+  .radar-ai-fab-image{width:56px;height:56px;border-radius:16px}
   .radar-reference-brand .radar-wordmark{width:164px!important}
 }
