@@ -2,8 +2,25 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
+import type { LucideIcon } from "lucide-react";
 import { Activity, ArrowUpRight, BrainCircuit, CircleDot, Radar, ShieldCheck, Sparkles, Target, TrendingUp, Zap } from "lucide-react";
 import { Confidence, PageIntro } from "@/components/intelligence-ui";
+
+type Metric = { label: string; value: string; note: string; icon: LucideIcon };
+type FormingMove = { move: string; company: string; score: number };
+
+const metrics: Metric[] = [
+  { label: "Actionable signals", value: "12", note: "+4 today", icon: Activity },
+  { label: "RADAR Moves", value: "4", note: "2 forming", icon: Radar },
+  { label: "Open decisions", value: "3", note: "1 urgent", icon: BrainCircuit },
+  { label: "Sensor coverage", value: "87%", note: "+6% this week", icon: ShieldCheck },
+];
+
+const formingMoves: FormingMove[] = [
+  { move: "Enterprise expansion", company: "LearnSphere", score: 89 },
+  { move: "AI product push", company: "SkillForge", score: 81 },
+  { move: "New geography", company: "EduNova", score: 72 },
+];
 
 const bars = [28, 36, 31, 49, 41, 56, 52, 71, 63, 81, 76, 92];
 
@@ -44,12 +61,12 @@ export default function Home() {
       </section>
 
       <section className="metrics-grid">
-        {[["Actionable signals", "12", "+4 today", Activity],["RADAR Moves", "4", "2 forming", Radar],["Open decisions", "3", "1 urgent", BrainCircuit],["Sensor coverage", "87%", "+6% this week", ShieldCheck]].map(([label, value, note, Icon]) => <article className="metric-card" key={label as string}><div className="metric-icon"><Icon size={17} /></div><span>{label as string}</span><strong>{value as string}</strong><small>{note as string}</small></article>)}
+        {metrics.map(({ label, value, note, icon: Icon }) => <article className="metric-card" key={label}><div className="metric-icon"><Icon size={17} /></div><span>{label}</span><strong>{value}</strong><small>{note}</small></article>)}
       </section>
 
       <section className="dashboard-grid">
         <article className="panel trend-panel"><div className="panel-heading"><div><h3>Intelligence velocity</h3><p>Meaningful market change detected over time</p></div></div><div className="trend-number"><strong>+38%</strong><span><TrendingUp size={13} /> vs previous period</span></div><IntelligenceGraph /></article>
-        <article className="panel moves-panel"><div className="panel-heading"><div><h3>Moves forming</h3><p>Patterns RADAR is connecting now</p></div><Link href="/moves" className="ghost-link">View all</Link></div><div className="move-list">{[["Enterprise expansion","LearnSphere",89],["AI product push","SkillForge",81],["New geography","EduNova",72]].map(([move, company, score]) => <Link href="/moves/enterprise-expansion" className="move-row" key={move as string}><div className="move-orbit"><span /></div><div className="move-copy"><strong>{move as string}</strong><span>{company as string}</span></div><div className="move-score">{score as number}%</div></Link>)}</div></article>
+        <article className="panel moves-panel"><div className="panel-heading"><div><h3>Moves forming</h3><p>Patterns RADAR is connecting now</p></div><Link href="/moves" className="ghost-link">View all</Link></div><div className="move-list">{formingMoves.map(({ move, company, score }) => <Link href="/moves/enterprise-expansion" className="move-row" key={move}><div className="move-orbit"><span /></div><div className="move-copy"><strong>{move}</strong><span>{company}</span></div><div className="move-score">{score}%</div></Link>)}</div></article>
       </section>
 
       <section className="panel market-strip"><div className="market-title"><CircleDot size={17} /><div><strong>Market pulse</strong><span>12 meaningful signals detected in the last 24 hours</span></div></div><div className="micro-bars">{bars.map((h, i) => <motion.span key={i} initial={{ height: 0 }} animate={{ height: `${h}%` }} transition={{ delay: .25 + i * .03 }} />)}</div><Link href="/market-map" className="secondary-button">Open market map <ArrowUpRight size={14} /></Link></section>
