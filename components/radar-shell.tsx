@@ -7,16 +7,16 @@ import {
   BarChart3,
   Bell,
   BookOpen,
-  Building2,
   ChevronDown,
   Diamond,
   FileText,
-  Globe2,
   Home,
   Link2,
+  MessageCircle,
   Search,
   Settings,
   Signal,
+  Sparkles,
   Star,
   Users,
 } from "lucide-react";
@@ -49,7 +49,7 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
   const Icon = item.icon;
   return (
     <Link href={item.href} className={`nav-item ${isActive(pathname, item.href) ? "active" : ""}`}>
-      <Icon size={17} />
+      <Icon size={17} strokeWidth={1.8} />
       <span>{item.label}</span>
     </Link>
   );
@@ -62,7 +62,7 @@ export function RadarShell({ children }: { children: React.ReactNode }) {
     <main className="app-shell radar-reference-shell">
       <aside className="sidebar radar-reference-sidebar">
         <div className="brand-row radar-reference-brand">
-          <Link href="/" aria-label="RADAR home"><RadarLogo /></Link>
+          <Link href="/" aria-label="RADAR home" className="radar-logo-link"><RadarLogo /></Link>
         </div>
 
         <nav className="nav-list radar-reference-nav" aria-label="RADAR navigation">
@@ -89,22 +89,26 @@ export function RadarShell({ children }: { children: React.ReactNode }) {
 
       <section className="main-panel radar-reference-main">
         <header className="topbar radar-reference-topbar">
-          <Link href="/ask" className="command-search radar-reference-search">
-            <Search size={18} />
+          <div className="command-search radar-reference-search" role="search">
+            <Search size={18} strokeWidth={1.8} />
             <span>Search for companies, markets, technologies, or signals...</span>
             <kbd>⌘ K</kbd>
-          </Link>
+          </div>
           <div className="top-actions radar-reference-actions">
-            <Link href="/sources" className="icon-button radar-bell" aria-label="Notifications"><Bell size={18} /><span className="notification-dot" /></Link>
+            <Link href="/sources" className="icon-button radar-bell" aria-label="Notifications"><Bell size={18} strokeWidth={1.8} /><span className="notification-dot" /></Link>
             <div className="radar-top-divider" />
             <button className="profile-button radar-profile">
               <span>DS</span>
               <div><strong>Dipanshu Sahu</strong><small>Strategic Lead</small></div>
-              <ChevronDown size={15} />
+              <ChevronDown size={15} strokeWidth={1.8} />
             </button>
           </div>
         </header>
         {children}
+        <Link href="/ask" className={`radar-ai-launcher ${pathname === "/ask" ? "active" : ""}`} aria-label="Ask RADAR">
+          <span className="radar-ai-icon"><Sparkles size={18} strokeWidth={1.8} /><MessageCircle size={10} strokeWidth={1.8} /></span>
+          <span className="radar-ai-copy"><strong>Ask RADAR</strong><small>Assistant</small></span>
+        </Link>
       </section>
     </main>
   );
