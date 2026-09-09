@@ -22,11 +22,12 @@
 .radar-reference-main .ref-hero-card,.radar-reference-main .radar-sidebar-promo{color:#fff!important}
 .radar-reference-main .ref-hero-card h2,.radar-reference-main .ref-hero-card p,.radar-reference-main .ref-hero-card span,.radar-reference-main .ref-hero-card strong{color:#fff!important}
 
-/* exact approved logo artwork, fully visible */
-.radar-reference-brand{height:78px!important;padding:10px 8px 18px!important;overflow:visible!important;display:flex!important;align-items:flex-start!important}
-.radar-reference-brand .radar-logo-link{display:block!important;width:100%!important;height:46px!important;overflow:visible!important}
-.radar-reference-brand .radar-wordmark-image{width:100%!important;max-width:182px!important;height:46px!important;display:flex!important;align-items:center!important;justify-content:flex-start!important;overflow:visible!important;color:transparent!important}
-.radar-reference-brand .radar-wordmark-img{display:block!important;width:100%!important;height:auto!important;max-height:46px!important;object-fit:contain!important;object-position:left center!important;filter:brightness(0) invert(1)!important}
+/* exact approved logo artwork, hard constrained so it can never overflow */
+.radar-reference-brand{height:72px!important;padding:12px 12px 18px!important;overflow:hidden!important;display:flex!important;align-items:flex-start!important;justify-content:flex-start!important}
+.radar-reference-brand .radar-logo-link{display:block!important;width:168px!important;max-width:168px!important;height:30px!important;overflow:hidden!important;flex:0 0 168px!important}
+.radar-reference-brand .radar-wordmark-image{display:block!important;width:168px!important;max-width:168px!important;height:30px!important;overflow:hidden!important;margin:0!important;padding:0!important}
+.radar-reference-brand .radar-wordmark-img,
+.radar-reference-brand img{display:block!important;width:168px!important;max-width:168px!important;height:27px!important;max-height:27px!important;min-width:0!important;min-height:0!important;object-fit:contain!important;object-position:left center!important;margin:0!important;padding:0!important;transform:none!important;filter:brightness(0) invert(1)!important}
 
 /* icon-only Ask RADAR */
 .radar-ai-launcher{display:none!important}
@@ -45,5 +46,6 @@
 @media(max-width:820px){
   .radar-ai-fab{right:16px;bottom:16px;width:58px;height:58px}
   .radar-ai-fab-image{width:58px;height:58px;border-radius:16px}
-  .radar-reference-brand .radar-wordmark-image{max-width:170px!important}
+  .radar-reference-brand .radar-logo-link,.radar-reference-brand .radar-wordmark-image{width:160px!important;max-width:160px!important;flex-basis:160px!important}
+  .radar-reference-brand .radar-wordmark-img,.radar-reference-brand img{width:160px!important;max-width:160px!important;height:25px!important;max-height:25px!important}
 }
