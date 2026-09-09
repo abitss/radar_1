@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { RadarShell } from "@/components/radar-shell";
 import "./globals.css";
 import "./intelligence.css";
+import "./onboarding.css";
 
 export const metadata: Metadata = {
   title: "RADAR | Strategic Intelligence OS",
