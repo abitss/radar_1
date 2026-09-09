@@ -4,6 +4,7 @@ import "./globals.css";
 import "./intelligence.css";
 import "./onboarding.css";
 import "./reference-dashboard.css";
+import "./reference-system.css";
 
 export const metadata: Metadata = {
   title: "RADAR | Strategic Intelligence OS",
