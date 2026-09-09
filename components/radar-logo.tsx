@@ -16,7 +16,7 @@ export function RadarLogo({ compact = false, className = "" }: RadarLogoProps) {
 
   return (
     <div className={`radar-wordmark ${className}`} aria-label="RADAR">
-      <svg viewBox="0 0 690 118" role="img" aria-hidden="true">
+      <svg viewBox="0 0 710 118" role="img" aria-hidden="true" preserveAspectRatio="xMinYMid meet">
         <g fill="currentColor">
           <path d="M16 25h82c24 0 39 13 39 34 0 18-12 29-31 32l38 28h-31L76 91H16V72h82c11 0 18-5 18-14 0-8-7-14-18-14H16V25Z" />
           <path d="M185 119h-24l58-94c4-7 10-11 17-11s13 4 17 11l58 94h-25l-50-80-51 80Z" />
