@@ -7,8 +7,72 @@
 .radar-reference-main .section-intro h1,.radar-reference-main h2,.radar-reference-main h3,.radar-reference-main strong{color:#15191c}
 .radar-reference-main .panel-heading h3,.radar-reference-main .card-heading strong{color:#252a2e!important}
 .radar-reference-main .panel-heading p,.radar-reference-main .card-heading small{color:#747b81!important}
-.radar-reference-main .live-dot,.radar-reference-main .notification-dot,.radar-reference-main .node-pulse,.radar-reference-main .move-orbit span,.radar-reference-main .bootstrap-progress span,.radar-reference-main .total-progress span,.radar-reference-main .step-progress span,.radar-reference-main .confidence-pill>span{background:#737a80!important;box-shadow:none!important}
-.radar-reference-main .status-chip,.radar-reference-main .live-chip,.radar-reference-main .signal-type,.radar-reference-main .decision-urgency,.radar-reference-main .move-status,.radar-reference-main .priority-label,.radar-reference-main .text-button,.radar-reference-main .ghost-link,.radar-reference-main .recommendation span,.radar-reference-main .recommendation-icon,.radar-reference-main .card-icon{color:#555c62!important;border-color:#d4d8db!important;background:#eef0f2!important}
+
+/* grayscale-only status, progress and accent system */
+.radar-reference-main .live-dot,
+.radar-reference-main .notification-dot,
+.radar-reference-main .node-pulse,
+.radar-reference-main .move-orbit span,
+.radar-reference-main .bootstrap-progress span,
+.radar-reference-main .total-progress span,
+.radar-reference-main .step-progress span,
+.radar-reference-main .confidence-pill>span{background:#737a80!important;box-shadow:none!important}
+
+.radar-reference-main .status-chip,
+.radar-reference-main .live-chip,
+.radar-reference-main .signal-type,
+.radar-reference-main .decision-urgency,
+.radar-reference-main .move-status,
+.radar-reference-main .priority-label,
+.radar-reference-main .text-button,
+.radar-reference-main .ghost-link,
+.radar-reference-main .recommendation span,
+.radar-reference-main .recommendation-icon,
+.radar-reference-main .card-icon{color:#555c62!important;border-color:#d4d8db!important;background:#eef0f2!important}
+
+/* remove EVERY leftover green/teal accent from legacy page components */
+.radar-reference-main .collection-index,
+.radar-reference-main .list-index,
+.radar-reference-main .item-index,
+.radar-reference-main .company-index,
+.radar-reference-main .company-rank,
+.radar-reference-main .candidate-rank,
+.radar-reference-main .rank-index,
+.radar-reference-main .signal-index,
+.radar-reference-main .score-accent,
+.radar-reference-main .accent,
+.radar-reference-main .muted-accent,
+.radar-reference-main .positive,
+.radar-reference-main .change-positive,
+.radar-reference-main .trend-up,
+.radar-reference-main .status-positive,
+.radar-reference-main .success,
+.radar-reference-main .success-text,
+.radar-reference-main .company-card>span:first-child,
+.radar-reference-main .collection-card>span:first-child,
+.radar-reference-main .simple-card>span:first-child{color:#6f767c!important}
+
+.radar-reference-main .collection-card span,
+.radar-reference-main .simple-card span,
+.radar-reference-main .collection-card small,
+.radar-reference-main .simple-card small{color:#747b81!important}
+
+.radar-reference-main .collection-card strong,
+.radar-reference-main .simple-card strong{color:#1b1f22!important}
+
+.radar-reference-main a:not(.primary-button):not(.secondary-button):not(.ref-hero-button):not(.ref-decision-button):not(.radar-ai-fab){color:inherit!important}
+
+.radar-reference-main .status-positive,
+.radar-reference-main .success,
+.radar-reference-main .success-chip,
+.radar-reference-main .positive-badge,
+.radar-reference-main .trend-up{background:#eef0f2!important;border-color:#d4d8db!important;color:#555c62!important;box-shadow:none!important}
+
+.radar-reference-main svg[stroke="#10b981"],
+.radar-reference-main svg[stroke="#22c55e"],
+.radar-reference-main svg[stroke="#14b8a6"],
+.radar-reference-main svg[stroke="#2dd4bf"]{stroke:#6f767c!important}
+
 .radar-reference-main .primary-button{background:#2d3236!important;color:#fff!important}
 .radar-reference-main .secondary-button{background:#f6f7f8!important;color:#31363a!important;border-color:#d8dcdf!important}
 .radar-reference-main .recommendation{background:#f7f8f9!important;border-color:#dfe3e6!important}
@@ -29,9 +93,9 @@
 .radar-reference-brand .radar-wordmark-img,
 .radar-reference-brand img{display:block!important;width:168px!important;max-width:168px!important;height:27px!important;max-height:27px!important;min-width:0!important;min-height:0!important;object-fit:contain!important;object-position:left center!important;margin:0!important;padding:0!important;transform:none!important;filter:brightness(0) invert(1)!important}
 
-/* icon-only Ask RADAR */
+/* icon-only Ask RADAR, intentionally inset from screen edges */
 .radar-ai-launcher{display:none!important}
-.radar-ai-fab{position:fixed;right:28px;bottom:28px;z-index:90;width:62px;height:62px;display:flex;align-items:center;justify-content:center;border-radius:18px;text-decoration:none;transition:transform .18s ease,filter .18s ease}
+.radar-ai-fab{position:fixed;right:44px;bottom:42px;z-index:90;width:62px;height:62px;display:flex;align-items:center;justify-content:center;border-radius:18px;text-decoration:none;transition:transform .18s ease,filter .18s ease}
 .radar-ai-fab:hover{transform:translateY(-2px) scale(1.02)}
 .radar-ai-fab:active{transform:scale(.98)}
 .radar-ai-fab-image{display:block;width:62px;height:62px;object-fit:contain;border-radius:18px;box-shadow:0 12px 30px rgba(0,0,0,.18)}
@@ -44,7 +108,7 @@
 .radar-profile small{color:#747b80!important}
 
 @media(max-width:820px){
-  .radar-ai-fab{right:16px;bottom:16px;width:58px;height:58px}
+  .radar-ai-fab{right:22px;bottom:24px;width:58px;height:58px}
   .radar-ai-fab-image{width:58px;height:58px;border-radius:16px}
   .radar-reference-brand .radar-logo-link,.radar-reference-brand .radar-wordmark-image{width:160px!important;max-width:160px!important;flex-basis:160px!important}
   .radar-reference-brand .radar-wordmark-img,.radar-reference-brand img{width:160px!important;max-width:160px!important;height:25px!important;max-height:25px!important}
