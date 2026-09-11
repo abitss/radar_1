@@ -51,6 +51,41 @@ export async function searchWeb(query: string, limit = 6): Promise<FirecrawlSear
   return Array.isArray(rows) ? rows.filter((row) => row?.url) : [];
 }
 
+export async function scrapeCompanyProfile(url: string) {
+  const schema = {
+    type: "object",
+    properties: {
+      company_name: { type: "string" },
+      one_line_description: { type: "string" },
+      problem_statement: { type: "string" },
+      target_customers: { type: "string" },
+      buyer: { type: "string" },
+      product_keywords: { type: "array", items: { type: "string" } },
+      capability_keywords: { type: "array", items: { type: "string" } },
+      technology_keywords: { type: "array", items: { type: "string" } },
+      geography: { type: "string" },
+      business_model: { type: "string" },
+    },
+    required: ["company_name","one_line_description","problem_statement","target_customers","buyer","product_keywords","capability_keywords","technology_keywords","geography","business_model"],
+  };
+
+  const payload = await firecrawlRequest("/scrape", {
+    url,
+    formats: [
+      "markdown",
+      {
+        type: "json",
+        schema,
+        prompt: "Understand this startup for competitive intelligence. Extract only claims supported by the public page. Use concise phrases. Product keywords should describe products/categories, capability keywords should describe features/workflows, and technology keywords should describe explicit or strongly evidenced technology. Do not invent missing facts; use empty strings or arrays when uncertain."
+      }
+    ],
+    onlyMainContent: true,
+    timeout: 120000,
+  });
+
+  return payload?.data || payload;
+}
+
 export async function createMonitor(body: unknown) {
   return firecrawlRequest("/monitor", body);
 }
