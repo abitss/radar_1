@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
+import { createMonitor } from "@/lib/firecrawl";
 
 function domainOf(raw:string){try{return new URL(raw).hostname.replace(/^www\./,"").toLowerCase()}catch{return""}}
 function originOf(raw:string){try{return new URL(raw).origin}catch{return raw}}
@@ -31,7 +32,7 @@ export async function POST(req:Request){
     const boundCompetitorRows=monitor.competitor_id?await sbSelect(`radar_competitors?id=eq.${monitor.competitor_id}&workspace_id=eq.${workspace.id}&select=*&limit=1`):[];
     const boundCompetitor=boundCompetitorRows[0]||null;
 
-    let processed=0, promoted=0;
+    let processed=0,promoted=0;
     for(const event of flattenEvents(payload)){
       const meaningful=event?.isMeaningful??event?.judgment?.meaningful??true;
       if(!meaningful)continue;
@@ -43,6 +44,7 @@ export async function POST(req:Request){
       const title=String(event?.title||event?.metadata?.title||domain).slice(0,200);
       const confidence=event?.judgment?.confidence==="high"?92:event?.judgment?.confidence==="low"?60:78;
       let competitor=boundCompetitor;
+      let newlyPromoted=false;
 
       if(monitor.monitor_type==="web_discovery"){
         const score=provisionalScore(`${title} ${reason} ${diffText}`,workspace);
@@ -55,13 +57,21 @@ export async function POST(req:Request){
         if(existingCompetitor[0]) competitor=existingCompetitor[0];
         else if(score>=24&&confidence>=78){
           const rows=await sbInsert("radar_competitors",{workspace_id:workspace.id,name:title.split(/[|–—-]/)[0].trim().slice(0,80)||domain.split(".")[0],website:originOf(url),description:reason,category:categoryFor(score),similarity_score:score,threat_score:Math.min(100,Math.round(score*1.08)),momentum_score:45,movement:"closer",why_it_matters:`Automatically promoted from continuous public-web discovery. Provisional similarity ${score}% with ${confidence}% discovery confidence.`});
-          competitor=rows[0]||null; promoted++;
+          competitor=rows[0]||null; promoted++; newlyPromoted=Boolean(competitor);
         }
       }
 
       await sbInsert("radar_evidence",{workspace_id:workspace.id,competitor_id:competitor?.id||null,source_url:url,source_type:monitor.monitor_type==="entity_surveillance"?"competitor_change":"continuous_web_monitor",title,fact:reason,summary:diffText||"New public information detected by continuous monitoring.",confidence});
       const impact=competitor?Math.max(55,Math.round(Number(competitor.threat_score||0))):55;
       await sbInsert("radar_signals",{workspace_id:workspace.id,competitor_id:competitor?.id||null,signal_type:monitor.monitor_type==="entity_surveillance"?"competitor_change":competitor?"new_competitor":"new_web_candidate",title:competitor?`${competitor.name}: ${reason.slice(0,120)}`:`New competitive candidate: ${title}`,summary:diffText||reason,impact_score:impact,confidence,status:"new"});
+
+      if(newlyPromoted&&competitor){
+        try{
+          const created=await createMonitor({name:`RADAR · ${competitor.name} · auto watch`,schedule:{text:impact>=80?"every 6 hours":impact>=60?"every 12 hours":"daily",timezone:"UTC"},targets:[{type:"scrape",urls:[originOf(url)]}],goal:`Alert only when ${competitor.name} makes a meaningful public change in product, pricing, positioning, customers, partnerships, hiring, technology or go-to-market. Ignore cosmetic changes.`,judgeEnabled:true,webhook:{url:`${new URL(req.url).origin}/api/radar/firecrawl-webhook`,events:["monitor.page","monitor.check.completed"],headers:{"x-radar-webhook-secret":expected}}});
+          const providerId=created?.id||created?.data?.id||created?.monitor?.id;
+          await sbInsert("radar_monitors",{workspace_id:workspace.id,competitor_id:competitor.id,provider:"firecrawl",provider_monitor_id:providerId||null,monitor_type:"entity_surveillance",name:`Automatic surveillance: ${competitor.name}`,schedule_text:impact>=80?"every 6 hours":impact>=60?"every 12 hours":"daily",goal:`Meaningful competitive changes from ${competitor.name}`,status:"active"});
+        }catch{}
+      }
 
       if(competitor&&impact>=65){
         await sbInsert("radar_recommendations",{workspace_id:workspace.id,competitor_id:competitor.id,priority:impact>=85?"high":"medium",title:monitor.monitor_type==="web_discovery"?`Investigate newly discovered competitor ${competitor.name}`:`Review new change from ${competitor.name}`,rationale:reason,action:"Review the source evidence, compare the strongest overlap dimensions, and decide whether positioning, roadmap, pricing or GTM requires a response."});
