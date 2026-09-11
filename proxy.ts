@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 const PUBLIC_PATHS = [
   "/login",
+  "/reset-password",
   "/auth/callback",
   "/api/auth/login",
   "/api/auth/signup",
+  "/api/auth/password-recovery",
+  "/api/auth/update-password",
   "/api/auth/magic-link",
   "/api/auth/session-from-token",
   "/api/radar/firecrawl-webhook",
