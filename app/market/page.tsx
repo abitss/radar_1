@@ -1,46 +1,26 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { ArrowUpRight, Radar, ScanSearch, ShieldAlert, Sparkles } from "lucide-react";
 import { CompetitorRadar } from "@/components/competitor-radar";
-import { PageIntro, StatTile } from "@/components/intelligence-ui";
+import { PageIntro } from "@/components/intelligence-ui";
 
 export default function MarketPage(){
+  const [data,setData]=useState<any>(null); const [discovering,setDiscovering]=useState(false); const [message,setMessage]=useState("");
+  async function load(){const d=await fetch("/api/radar/overview",{cache:"no-store"}).then(r=>r.json());setData(d)}
+  useEffect(()=>{load()},[]);
+  async function discover(){setDiscovering(true);setMessage("Scanning public web...");const r=await fetch("/api/radar/discover",{method:"POST"});const d=await r.json();setMessage(r.ok?`${d.inspected||0} results inspected · ${d.promoted||0} new competitors promoted`:d.error||"Discovery failed");await load();setDiscovering(false)}
+  const m=data?.metrics||{};
   return <div className="content">
-    <PageIntro
-      eyebrow="COMPETITIVE INTELLIGENCE"
-      title="See every company that can become your competitor."
-      description="RADAR maps direct, adjacent, emerging and micro-level competitors around your startup. Distance represents strategic similarity, and movement shows who is converging toward you."
-      action={<Link href="/discover" className="primary-button"><ScanSearch size={14}/>Discover competitors</Link>}
-    />
-
-    <section className="metrics-grid">
-      <StatTile label="Competitive universe" value="84" note="Companies discovered" />
-      <StatTile label="Core competitors" value="7" note="Similarity ≥ 80%" />
-      <StatTile label="Micro overlaps" value="23" note="Feature or capability level" />
-      <StatTile label="Moved closer" value="5" note="Last 30 days" />
-    </section>
-
-    <CompetitorRadar />
-
+    <PageIntro eyebrow="COMPETITIVE INTELLIGENCE" title="Your living competitive map." description="Distance represents strategic similarity. RADAR continuously discovers companies and pulls them inward or outward as public evidence changes." action={<button onClick={discover} disabled={discovering} className="primary-button"><ScanSearch size={14}/>{discovering?"Scanning...":"Scan market now"}</button>}/>
+    {message?<div className="competition-live-message" style={{marginBottom:12}}>{message}</div>:null}
+    <section className="metrics-grid"><div className="stat-tile"><span>Competitive universe</span><strong>{m.competitors??0}</strong><small>Tracked companies</small></div><div className="stat-tile"><span>Core competitors</span><strong>{m.core??0}</strong><small>Similarity ≥ 80%</small></div><div className="stat-tile"><span>New candidates</span><strong>{m.candidates??0}</strong><small>Awaiting stronger evidence</small></div><div className="stat-tile"><span>Moved closer</span><strong>{m.movingCloser??0}</strong><small>Convergence detected</small></div></section>
+    <CompetitorRadar/>
     <section className="founder-two-col competition-bottom-grid">
-      <article className="panel founder-panel founder-dark-panel">
-        <div className="founder-panel-head"><div><span>EARLY WARNING</span><h2>Detect convergence before it becomes obvious.</h2></div><Radar size={21}/></div>
-        <p>A company does not need to call itself your competitor. RADAR watches changes in product, buyer, pricing, hiring, technology and positioning, then recalculates competitive proximity automatically.</p>
-        <Link href="/moves" className="founder-dark-link">See strategic moves <ArrowUpRight size={14}/></Link>
-      </article>
-
-      <article className="panel founder-panel">
-        <div className="founder-panel-head"><div><span>FOUNDER ATTENTION</span><h2>What deserves action</h2></div><ShieldAlert size={21}/></div>
-        <div className="founder-list-rows">
-          <div><strong>One direct competitor is moving inward</strong><span>Buyer and workflow overlap increased this month.</span></div>
-          <div><strong>Three micro-competitors matter</strong><span>They overlap with capabilities that could become your wedge or dependency.</span></div>
-          <div><strong>One emerging entrant is worth watching</strong><span>Low similarity today, but trajectory is toward your category.</span></div>
-        </div>
-      </article>
+      <article className="panel founder-panel founder-dark-panel"><div className="founder-panel-head"><div><span>EARLY WARNING</span><h2>Detect convergence before it becomes obvious.</h2></div><Radar size={21}/></div><p>A company does not need to call itself your competitor. RADAR watches product, buyer, pricing, hiring, technology and positioning, then recalculates competitive proximity.</p><Link href="/signals" className="founder-dark-link">See live signals <ArrowUpRight size={14}/></Link></article>
+      <article className="panel founder-panel"><div className="founder-panel-head"><div><span>CONTINUOUS STATUS</span><h2>{data?.monitor?"Web-wide discovery is active":"Continuous discovery is not active"}</h2></div><ShieldAlert size={21}/></div><p>{data?.monitor?`RADAR monitor is active and will keep searching for new competitive evidence. Last provider event: ${data.monitor.last_event_at?new Date(data.monitor.last_event_at).toLocaleString():"waiting for first event"}.`:"Re-run onboarding to activate the continuous public-web monitor."}</p></article>
     </section>
-
-    <section className="panel competition-decision-banner">
-      <div><Sparkles size={18}/><span>RADAR PRINCIPLE</span><strong>Never show a founder a change without explaining what it means and what to do next.</strong></div>
-      <Link href="/decisions">Open decision engine <ArrowUpRight size={14}/></Link>
-    </section>
-  </div>
+    <section className="panel competition-decision-banner"><div><Sparkles size={18}/><span>RADAR PRINCIPLE</span><strong>Never show a founder a change without explaining why it matters.</strong></div><Link href="/decisions">Open decisions <ArrowUpRight size={14}/></Link></section>
+  </div>;
 }
