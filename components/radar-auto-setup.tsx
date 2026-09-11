@@ -39,7 +39,7 @@ export function RadarAutoSetup({ disabled = false }: { disabled?: boolean }) {
 
         if(alive){
           setStatus("working");
-          setMessage("RADAR is building your competitive universe in the background. You can keep using the app.");
+          setMessage("RADAR is scanning in fast mode. You can keep using the app.");
         }
 
         if(!brainReady){
@@ -58,13 +58,13 @@ export function RadarAutoSetup({ disabled = false }: { disabled?: boolean }) {
         }
 
         const competitorsResult = await json("/api/radar/competitors");
-        const competitors = Array.isArray(competitorsResult.data) ? competitorsResult.data.slice(0,3) : [];
+        const competitors = Array.isArray(competitorsResult.data) ? competitorsResult.data.slice(0,2) : [];
         await Promise.all(competitors.map(async (competitor:any)=>{
           try{
             const scan = await json("/api/radar/scan",{
               method:"POST",
               headers:{"Content-Type":"application/json"},
-              body:JSON.stringify({competitorId:competitor.id})
+              body:JSON.stringify({competitorId:competitor.id,quick:true})
             });
             return scan.res.ok || Boolean(scan.data?.cooldown);
           }catch{return false;}
@@ -78,7 +78,7 @@ export function RadarAutoSetup({ disabled = false }: { disabled?: boolean }) {
 
         if(alive){
           setStatus("done");
-          setMessage("RADAR is ready. Your competitive universe will keep updating automatically.");
+          setMessage("Initial RADAR scan is ready. Deeper evidence will accumulate automatically.");
           await sleep(3500);
           if(alive) setStatus("idle");
         }
