@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/signup", "/api/radar/firecrawl-webhook"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/auth/callback",
+  "/api/auth/login",
+  "/api/auth/signup",
+  "/api/auth/magic-link",
+  "/api/auth/session-from-token",
+  "/api/radar/firecrawl-webhook",
+];
 const LEGACY_REDIRECTS: Record<string,string> = {
   "/customers":"/market",
   "/money":"/market",
