@@ -12,7 +12,6 @@ import {
   Home,
   Search,
   Settings,
-  Sparkles,
   Target,
 } from "lucide-react";
 import { RadarLogo } from "@/components/radar-logo";
@@ -161,7 +160,7 @@ export function RadarShell({ children }: { children: React.ReactNode }) {
         {children}
 
         <Link href="/ask" className={`radar-ai-fab ${pathname === "/ask" ? "active" : ""}`} aria-label="Ask RADAR" title="Ask RADAR">
-          <span className="radar-ai-fab-glyph"><Sparkles size={28} strokeWidth={1.9} /></span>
+          <img src="/ask-radar-icon.svg" alt="" aria-hidden="true" className="radar-ai-fab-image" />
         </Link>
       </section>
     </main>
