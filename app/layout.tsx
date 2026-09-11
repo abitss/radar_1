@@ -7,11 +7,12 @@ import "./reference-dashboard.css";
 import "./reference-system.css";
 import "./polish-fixes.css";
 import "./navigation-simplify.css";
+import "./founder-os.css";
 
 export const metadata: Metadata = {
-  title: "RADAR | Strategic Intelligence OS",
+  title: "RADAR | Founder Intelligence OS",
   description:
-    "RADAR watches your market, connects meaningful changes, and turns them into strategic decisions.",
+    "RADAR helps founders see customer truth, market change, runway risk and critical decisions before they become urgent.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
