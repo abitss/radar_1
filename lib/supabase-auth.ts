@@ -1,56 +1,72 @@
+import { createClient } from "@supabase/supabase-js";
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
 
-async function parseAuthResponse(res: Response) {
-  const text = await res.text();
-  let data: any;
-  try { data = text ? JSON.parse(text) : {}; } catch { data = { message: text }; }
-  if (!res.ok) throw new Error(data?.msg || data?.message || data?.error_description || "Authentication failed");
-  return data;
+function client() {
+  return createClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
 }
 
-async function authRequest(path: string, body: unknown, method = "POST", accessToken?: string) {
-  const headers: Record<string, string> = {
-    apikey: SUPABASE_KEY,
-    "Content-Type": "application/json",
-  };
-
-  // New Supabase publishable keys are opaque API keys, not user JWTs.
-  // Only attach Authorization when we actually have an authenticated user token.
-  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
-    method,
-    headers,
-    body: method === "GET" ? undefined : JSON.stringify(body),
-    cache: "no-store",
-  });
-  return parseAuthResponse(res);
+function throwIfError(error: { message?: string } | null) {
+  if (error) throw new Error(error.message || "Authentication failed");
 }
 
 export async function signUpFounder(email: string, password: string, redirectTo: string) {
-  return authRequest(`signup?redirect_to=${encodeURIComponent(redirectTo)}`, { email, password });
+  const supabase = client();
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { emailRedirectTo: redirectTo },
+  });
+  throwIfError(error);
+  return data;
 }
 
 export async function signInFounder(email: string, password: string) {
-  return authRequest("token?grant_type=password", { email, password });
+  const supabase = client();
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  throwIfError(error);
+  return data;
 }
 
 export async function sendPasswordRecovery(email: string, redirectTo: string) {
-  return authRequest(`recover?redirect_to=${encodeURIComponent(redirectTo)}`, { email });
+  const supabase = client();
+  const { data, error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+  throwIfError(error);
+  return data;
 }
 
 export async function updateFounderPassword(accessToken: string, password: string) {
-  return authRequest("user", { password }, "PUT", accessToken);
+  const supabase = client();
+  const { error: sessionError } = await supabase.auth.setSession({
+    access_token: accessToken,
+    refresh_token: accessToken,
+  });
+  throwIfError(sessionError);
+  const { data, error } = await supabase.auth.updateUser({ password });
+  throwIfError(error);
+  return data;
 }
 
 export async function sendMagicLinkFounder(email: string, redirectTo: string) {
-  return authRequest(`otp?redirect_to=${encodeURIComponent(redirectTo)}`, {
+  const supabase = client();
+  const { data, error } = await supabase.auth.signInWithOtp({
     email,
-    create_user: false,
+    options: { shouldCreateUser: false, emailRedirectTo: redirectTo },
   });
+  throwIfError(error);
+  return data;
 }
 
 export async function getFounderFromAccessToken(accessToken: string) {
-  return authRequest("user", {}, "GET", accessToken);
+  const supabase = client();
+  const { data, error } = await supabase.auth.getUser(accessToken);
+  throwIfError(error);
+  return data.user;
 }
