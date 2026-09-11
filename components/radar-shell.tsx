@@ -62,7 +62,7 @@ export function RadarShell({ children }: { children: React.ReactNode }) {
 
       <section className="main-panel radar-reference-main">
         <header className="topbar radar-reference-topbar">
-          <Link href="/signals" className="command-search radar-reference-search founder-search" aria-label="Search RADAR"><Search size={18} strokeWidth={1.8}/><span>Search competitors, signals and evidence...</span><kbd>⌘ K</kbd></Link>
+          <Link href="/ask" className="command-search radar-reference-search founder-search" aria-label="Ask RADAR"><Search size={18} strokeWidth={1.8}/><span>Ask RADAR about competitors, signals or decisions...</span><kbd>⌘ K</kbd></Link>
           <div className="top-actions radar-reference-actions">
             <Link href="/signals" className="icon-button radar-bell" aria-label="New signals"><Bell size={18} strokeWidth={1.8}/><span className="notification-dot"/></Link>
             <div className="radar-top-divider"/>
