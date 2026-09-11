@@ -9,11 +9,15 @@ async function parseAuthResponse(res: Response) {
   return data;
 }
 
-async function authRequest(path: string, body: unknown) {
+async function authRequest(path: string, body: unknown, method = "POST", accessToken?: string) {
   const res = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
-    method: "POST",
-    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    method,
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${accessToken || SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: method === "GET" ? undefined : JSON.stringify(body),
     cache: "no-store",
   });
   return parseAuthResponse(res);
@@ -27,6 +31,14 @@ export async function signInFounder(email: string, password: string) {
   return authRequest("token?grant_type=password", { email, password });
 }
 
+export async function sendPasswordRecovery(email: string, redirectTo: string) {
+  return authRequest(`recover?redirect_to=${encodeURIComponent(redirectTo)}`, { email });
+}
+
+export async function updateFounderPassword(accessToken: string, password: string) {
+  return authRequest("user", { password }, "PUT", accessToken);
+}
+
 export async function sendMagicLinkFounder(email: string, redirectTo: string) {
   return authRequest(`otp?redirect_to=${encodeURIComponent(redirectTo)}`, {
     email,
@@ -35,10 +47,5 @@ export async function sendMagicLinkFounder(email: string, redirectTo: string) {
 }
 
 export async function getFounderFromAccessToken(accessToken: string) {
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    method: "GET",
-    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${accessToken}` },
-    cache: "no-store",
-  });
-  return parseAuthResponse(res);
+  return authRequest("user", {}, "GET", accessToken);
 }
