@@ -26,7 +26,7 @@ function activeSection(pathname: string): MainKey | null {
   if (pathname === "/companies" || pathname.startsWith("/companies/")) return "competitors";
   if (pathname === "/signals" || pathname.startsWith("/signals/")) return "signals";
   if (["/decisions", "/actions", "/outcomes"].some(p => pathname === p || pathname.startsWith(`${p}/`))) return "decisions";
-  if (["/settings", "/brain", "/onboarding", "/sources", "/system-health"].some(p => pathname === p || pathname.startsWith(`${p}/`))) return "settings";
+  if (["/settings", "/brain", "/sources", "/system-health"].some(p => pathname === p || pathname.startsWith(`${p}/`))) return "settings";
   return null;
 }
 
@@ -38,7 +38,7 @@ function NavLink({ item, current }: { item: NavItem; current: MainKey | null }) 
 export function RadarShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  if (pathname === "/login") return <>{children}</>;
+  if (pathname === "/login" || pathname === "/onboarding") return <>{children}</>;
   const current = activeSection(pathname);
 
   async function logout() {
@@ -70,7 +70,7 @@ export function RadarShell({ children }: { children: React.ReactNode }) {
             <button onClick={logout} className="profile-button radar-profile" title="Sign out"><span>F</span><div><strong>Founder</strong><small>Private workspace</small></div><LogOut size={15} strokeWidth={1.8}/></button>
           </div>
         </header>
-        <RadarAutoSetup disabled={pathname === "/onboarding"}/>
+        <RadarAutoSetup/>
         {children}
         <Link href="/ask" className={`radar-ai-fab ${pathname === "/ask" ? "active" : ""}`} aria-label="Ask RADAR" title="Ask RADAR"><span className="radar-ai-fab-glyph"><Sparkles size={27} strokeWidth={1.8}/></span></Link>
       </section>
