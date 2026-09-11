@@ -37,7 +37,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     if (!firecrawlConfigured()) return NextResponse.json({ error: "FIRECRAWL_API_KEY is not configured." }, { status: 503 });
-    const { workspace } = await workspaceForRequest(req, true);
+    const { workspace, user } = await workspaceForRequest(req, true);
     const current = await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&monitor_type=eq.web_discovery&status=eq.active&select=*&limit=1`);
     if (current[0]) return NextResponse.json({ ok:true, monitor:current[0], alreadyActive:true });
 
@@ -56,6 +56,7 @@ export async function POST(req: Request) {
       goal,
       judgeEnabled: true,
       webhook: { url: webhookUrl, events: ["monitor.page", "monitor.check.completed"], headers: secret ? { "x-radar-webhook-secret": secret } : undefined },
+      notification: { email: { enabled: true, recipients: [user.email], includeDiffs: true } },
     });
 
     const providerId = created?.id || created?.data?.id || created?.monitor?.id;
