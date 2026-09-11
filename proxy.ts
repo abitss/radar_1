@@ -1,6 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/auth/signup", "/api/radar/firecrawl-webhook"];
+const LEGACY_REDIRECTS: Record<string,string> = {
+  "/customers":"/market",
+  "/money":"/market",
+  "/briefings":"/signals",
+  "/actions":"/decisions",
+  "/outcomes":"/decisions",
+  "/market-map":"/market",
+  "/watch-graph":"/market",
+  "/monitor":"/market",
+  "/intelligence":"/market",
+  "/brain":"/settings",
+  "/sources":"/settings",
+  "/system-health":"/settings",
+};
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -14,9 +28,15 @@ export function proxy(request: NextRequest) {
     url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
   }
+
+  const exact = LEGACY_REDIRECTS[pathname];
+  if (exact) {
+    const url = request.nextUrl.clone();
+    url.pathname = exact;
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
   return NextResponse.next();
 }
 
-export const config = {
-  matcher: ["/((?!_next/static|_next/image).*)"],
-};
+export const config = { matcher: ["/((?!_next/static|_next/image).*)"] };
