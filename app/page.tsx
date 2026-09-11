@@ -1,49 +1,44 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, CircleAlert, Radar, ShieldCheck, Users, WalletCards } from "lucide-react";
-import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { ArrowRight, CircleAlert, Radar, ShieldCheck, Signal, Target } from "lucide-react";
 
-const priorities = [
-  { rank:"01", title:"Talk to the 5 users who stopped using the product", reason:"Retention weakened in the newest cohort. This is more important than adding another acquisition channel.", href:"/customers" },
-  { rank:"02", title:"Review competitor enterprise move", reason:"Three independent signals suggest a direct competitor is moving toward larger institutional buyers.", href:"/market" },
-  { rank:"03", title:"Choose a runway plan before next hiring decision", reason:"Current burn leaves enough time to act, but not enough time to ignore capital planning.", href:"/money" },
-];
+type Overview = any;
 
 export default function Home(){
+  const [data,setData] = useState<Overview|null>(null);
+  const [error,setError] = useState("");
+  useEffect(()=>{ fetch("/api/radar/overview",{cache:"no-store"}).then(async r=>{const j=await r.json();if(!r.ok)throw new Error(j.error||"Could not load RADAR");return j}).then(setData).catch(e=>setError(e.message)); },[]);
+  if(error) return <div className="content"><div className="panel founder-panel"><strong>RADAR could not load.</strong><p>{error}</p></div></div>;
+  if(!data) return <div className="content"><div className="panel founder-panel">Loading your competitive universe...</div></div>;
+  if(!data.workspace?.website) return <div className="content founder-today"><div className="founder-today-head"><div><span>WELCOME TO RADAR</span><h1>Start with one URL.</h1><p>RADAR will understand your startup, discover competitors and activate continuous monitoring.</p></div></div><Link href="/onboarding" className="primary-button">Build my RADAR <ArrowRight size={14}/></Link></div>;
+
+  const urgent = (data.recommendations||[]).filter((r:any)=>r.status==="open").slice(0,4);
+  const signals = (data.signals||[]).slice(0,4);
   return <div className="content founder-today">
-    <motion.div className="founder-today-head" initial={{opacity:0,y:10}} animate={{opacity:1,y:0}}>
-      <div><span>FOUNDER BRIEF · TODAY</span><h1>Here’s what can change your company.</h1><p>RADAR removes everything that does not deserve founder attention.</p></div>
-      <div className="founder-status"><ShieldCheck size={18}/><span><strong>Company pulse</strong><small>3 things need attention</small></span></div>
-    </motion.div>
+    <div className="founder-today-head">
+      <div><span>FOUNDER BRIEF · LIVE</span><h1>{data.metrics.newSignals ? `${data.metrics.newSignals} new signal${data.metrics.newSignals===1?"":"s"} deserve attention.` : "No major new movement detected."}</h1><p>RADAR filters the public market into changes that may alter your competitive position.</p></div>
+      <div className="founder-status"><ShieldCheck size={18}/><span><strong>{data.monitor?"Continuous RADAR active":"Monitoring needs setup"}</strong><small>{data.monitor?"Public web checked automatically":"Open Settings to activate"}</small></span></div>
+    </div>
 
     <section className="founder-survival-grid">
-      <Link href="/customers" className="panel survival-card"><Users/><span>CUSTOMER TRUTH</span><strong>Needs proof</strong><small>4-week retention: 62%</small></Link>
-      <Link href="/market" className="panel survival-card"><Radar/><span>MARKET</span><strong>1 major move</strong><small>12 new signals</small></Link>
-      <Link href="/money" className="panel survival-card"><WalletCards/><span>RUNWAY</span><strong>11.4 months</strong><small>Plan raise in ~5 months</small></Link>
-      <Link href="/decisions" className="panel survival-card"><CircleAlert/><span>DECISIONS</span><strong>3 open</strong><small>1 should be made this week</small></Link>
+      <Link href="/companies" className="panel survival-card"><Radar/><span>COMPETITORS</span><strong>{data.metrics.competitors}</strong><small>{data.metrics.core} in your core zone</small></Link>
+      <Link href="/signals" className="panel survival-card"><Signal/><span>NEW SIGNALS</span><strong>{data.metrics.newSignals}</strong><small>Last 24 hours</small></Link>
+      <Link href="/market" className="panel survival-card"><CircleAlert/><span>MOVING CLOSER</span><strong>{data.metrics.movingCloser}</strong><small>Competitive convergence</small></Link>
+      <Link href="/decisions" className="panel survival-card"><Target/><span>DECISIONS</span><strong>{data.metrics.openDecisions}</strong><small>Open recommendations</small></Link>
     </section>
 
     <section className="founder-command-grid">
       <article className="panel founder-priorities">
-        <div className="founder-panel-head"><div><span>WHAT TO DO NEXT</span><h2>Founder priorities</h2></div><small>Ranked by survival impact</small></div>
-        <div className="founder-priority-list">{priorities.map((p)=><Link href={p.href} key={p.rank}><span>{p.rank}</span><div><strong>{p.title}</strong><small>{p.reason}</small></div><ArrowRight size={15}/></Link>)}</div>
+        <div className="founder-panel-head"><div><span>WHAT TO DO NEXT</span><h2>Founder priorities</h2></div><small>Evidence-backed</small></div>
+        <div className="founder-priority-list">
+          {urgent.length?urgent.map((r:any,i:number)=><Link href="/decisions" key={r.id}><span>0{i+1}</span><div><strong>{r.title}</strong><small>{r.action}</small></div><ArrowRight size={15}/></Link>):<div style={{padding:"18px 0",color:"#737a80",fontSize:13}}>No open recommendations yet. RADAR will create them when evidence crosses a meaningful threshold.</div>}
+        </div>
       </article>
-
       <article className="panel founder-dark-panel founder-why-now">
-        <span>WHY THIS MATTERS</span>
-        <h2>Don’t let the loudest problem become the strategy.</h2>
-        <p>RADAR should keep founders focused on leading indicators: customer pull, runway, market movement and the decisions that compound.</p>
-        <Link href="/ask">Ask RADAR what I should do today <ArrowRight size={14}/></Link>
+        <span>MARKET PULSE</span><h2>{signals[0]?.title || "The market is quiet right now."}</h2><p>{signals[0]?.summary || "RADAR will surface meaningful public changes here as continuous monitoring discovers them."}</p><Link href="/signals">Open live signals <ArrowRight size={14}/></Link>
       </article>
     </section>
-
-    <section className="panel founder-weekly-score">
-      <div><span>THIS WEEK</span><h2>Company health</h2></div>
-      <div className="founder-health-item"><span>Customer pull</span><strong>58</strong><i style={{width:"58%"}}/></div>
-      <div className="founder-health-item"><span>Market position</span><strong>74</strong><i style={{width:"74%"}}/></div>
-      <div className="founder-health-item"><span>Financial survival</span><strong>68</strong><i style={{width:"68%"}}/></div>
-      <div className="founder-health-item"><span>Execution</span><strong>81</strong><i style={{width:"81%"}}/></div>
-    </section>
-  </div>
+  </div>;
 }
