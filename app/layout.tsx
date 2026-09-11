@@ -8,6 +8,7 @@ import "./reference-system.css";
 import "./polish-fixes.css";
 import "./navigation-simplify.css";
 import "./founder-os.css";
+import "./functional-radar.css";
 
 export const metadata: Metadata = {
   title: "RADAR | Founder Intelligence OS",
