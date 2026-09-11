@@ -10,13 +10,18 @@ async function parseAuthResponse(res: Response) {
 }
 
 async function authRequest(path: string, body: unknown, method = "POST", accessToken?: string) {
+  const headers: Record<string, string> = {
+    apikey: SUPABASE_KEY,
+    "Content-Type": "application/json",
+  };
+
+  // New Supabase publishable keys are opaque API keys, not user JWTs.
+  // Only attach Authorization when we actually have an authenticated user token.
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+
   const res = await fetch(`${SUPABASE_URL}/auth/v1/${path}`, {
     method,
-    headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${accessToken || SUPABASE_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers,
     body: method === "GET" ? undefined : JSON.stringify(body),
     cache: "no-store",
   });
