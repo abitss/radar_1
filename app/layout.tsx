@@ -11,15 +11,10 @@ import "./founder-os.css";
 import "./functional-radar.css";
 
 export const metadata: Metadata = {
-  title: "RADAR | Founder Intelligence OS",
-  description:
-    "RADAR helps founders see customer truth, market change, runway risk and critical decisions before they become urgent.",
+  title: "RADAR | Continuous Competitive Intelligence for Founders",
+  description: "RADAR continuously discovers competitors, watches public market changes, maps competitive proximity and turns evidence into founder decisions.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return (
-    <html lang="en">
-      <body><RadarShell>{children}</RadarShell></body>
-    </html>
-  );
+  return <html lang="en"><body><RadarShell>{children}</RadarShell></body></html>;
 }
