@@ -10,7 +10,7 @@ function apiKey() {
   return key;
 }
 
-async function firecrawlRequest(path: string, body: unknown) {
+async function firecrawlRequest(path: string, body: unknown, timeoutMs = 30000) {
   const response = await fetch(`${FIRECRAWL_BASE}${path}`, {
     method: "POST",
     headers: {
@@ -19,6 +19,7 @@ async function firecrawlRequest(path: string, body: unknown) {
     },
     body: JSON.stringify(body),
     cache: "no-store",
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   const text = await response.text();
@@ -35,6 +36,24 @@ export type FirecrawlSearchResult = {
   markdown?: string;
 };
 
+function searchRows(payload: any): FirecrawlSearchResult[] {
+  const rows = payload?.data?.web || payload?.web || [];
+  return Array.isArray(rows) ? rows.filter((row) => row?.url) : [];
+}
+
+// Fast discovery path: search metadata only. This avoids scraping every result page
+// before we even know whether the company is relevant.
+export async function searchWebFast(query: string, limit = 5): Promise<FirecrawlSearchResult[]> {
+  const payload = await firecrawlRequest("/search", {
+    query,
+    limit,
+    sources: ["web"],
+    ignoreInvalidURLs: true,
+  }, 18000);
+  return searchRows(payload);
+}
+
+// Evidence path: search + scrape content. Use this only for high-value deep scans.
 export async function searchWeb(query: string, limit = 6): Promise<FirecrawlSearchResult[]> {
   const payload = await firecrawlRequest("/search", {
     query,
@@ -46,9 +65,8 @@ export async function searchWeb(query: string, limit = 6): Promise<FirecrawlSear
       onlyMainContent: true,
       maxAge: 21600000,
     },
-  });
-  const rows = payload?.data?.web || payload?.web || [];
-  return Array.isArray(rows) ? rows.filter((row) => row?.url) : [];
+  }, 30000);
+  return searchRows(payload);
 }
 
 export async function scrapeCompanyProfile(url: string) {
@@ -80,12 +98,12 @@ export async function scrapeCompanyProfile(url: string) {
       }
     ],
     onlyMainContent: true,
-    timeout: 120000,
-  });
+    timeout: 70000,
+  }, 80000);
 
   return payload?.data || payload;
 }
 
 export async function createMonitor(body: unknown) {
-  return firecrawlRequest("/monitor", body);
+  return firecrawlRequest("/monitor", body, 25000);
 }
