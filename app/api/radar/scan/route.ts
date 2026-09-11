@@ -20,6 +20,7 @@ export async function POST(req: Request) {
     if (!competitor?.website) return NextResponse.json({ error:"Competitor not found in this workspace." },{status:404});
     const domain=domainOf(competitor.website);
     if(!domain) return NextResponse.json({error:"Competitor website is invalid."},{status:400});
+    if(competitor.last_scanned_at&&Date.now()-new Date(competitor.last_scanned_at).getTime()<5*60*1000) return NextResponse.json({error:"This competitor was deep-scanned recently. Wait a few minutes before scanning again.",cooldown:true},{status:429});
 
     const run=(await sbInsert("radar_scan_runs",{workspace_id:workspace.id,competitor_id:competitor.id,run_type:"deep_public_scan",status:"running"}))[0];
     const queries=[`site:${domain} product OR platform OR solution`,`site:${domain} pricing OR plans`,`site:${domain} careers OR jobs OR hiring`,`site:${domain} docs OR documentation OR changelog OR release`,`site:${domain} customers OR case studies OR integrations OR partners`];
