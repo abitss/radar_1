@@ -27,9 +27,17 @@ export async function PATCH(req: Request) {
       "buyer",
       "geography",
       "business_model",
+      "founder_name",
+      "founder_role",
+      "founder_phone",
+      "founder_country",
+      "founder_goal",
     ] as const;
     for (const key of textFields) {
-      if (Object.prototype.hasOwnProperty.call(body, key)) allowed[key] = body[key] == null ? null : String(body[key]).trim();
+      if (Object.prototype.hasOwnProperty.call(body, key)) {
+        const value = body[key] == null ? null : String(body[key]).trim();
+        allowed[key] = typeof value === "string" ? value.slice(0, key === "founder_goal" ? 600 : 250) : value;
+      }
     }
 
     const arrayFields = ["product_keywords", "capability_keywords", "technology_keywords"] as const;
@@ -39,6 +47,10 @@ export async function PATCH(req: Request) {
           ? body[key].map((value: unknown) => String(value).trim()).filter(Boolean).slice(0, 40)
           : [];
       }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "onboarding_completed")) {
+      allowed.onboarding_completed = Boolean(body.onboarding_completed);
     }
 
     if (!Object.keys(allowed).length) return NextResponse.json(workspace);
