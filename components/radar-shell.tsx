@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
 import { Bell, Building2, LogOut, Radar, Search, Settings, Signal, Sparkles, Target, Home } from "lucide-react";
 import { RadarLogo } from "@/components/radar-logo";
+import { RadarAutoSetup } from "@/components/radar-auto-setup";
 
 type MainKey = "today" | "radar" | "competitors" | "signals" | "decisions" | "settings";
 type NavItem = { label: string; href: string; icon: LucideIcon; key: MainKey; hint: string };
@@ -69,6 +70,7 @@ export function RadarShell({ children }: { children: React.ReactNode }) {
             <button onClick={logout} className="profile-button radar-profile" title="Sign out"><span>F</span><div><strong>Founder</strong><small>Private workspace</small></div><LogOut size={15} strokeWidth={1.8}/></button>
           </div>
         </header>
+        <RadarAutoSetup disabled={pathname === "/onboarding"}/>
         {children}
         <Link href="/ask" className={`radar-ai-fab ${pathname === "/ask" ? "active" : ""}`} aria-label="Ask RADAR" title="Ask RADAR"><span className="radar-ai-fab-glyph"><Sparkles size={27} strokeWidth={1.8}/></span></Link>
       </section>
