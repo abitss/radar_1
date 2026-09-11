@@ -25,20 +25,35 @@ export default function OnboardingPage() {
 
   useEffect(()=>{
     let alive = true;
-    fetch("/api/radar/workspace",{cache:"no-store"})
-      .then(async r=>({ok:r.ok,data:await r.json()}))
-      .then(({ok,data})=>{
-        if(!alive) return;
-        if(ok && data?.website){
-          setExisting(data);
-          setWebsite(data.website);
-          router.replace("/market");
-          return;
-        }
-        setExisting(ok?data:null);
+    Promise.all([
+      fetch("/api/radar/workspace",{cache:"no-store"}).then(async r=>({ok:r.ok,data:await r.json()})),
+      fetch("/api/radar/overview",{cache:"no-store"}).then(async r=>({ok:r.ok,data:await r.json()})).catch(()=>({ok:false,data:null})),
+    ]).then(([workspaceResult,overviewResult])=>{
+      if(!alive) return;
+      if(!workspaceResult.ok){
         setLoadingWorkspace(false);
-      })
-      .catch(()=>{ if(alive) setLoadingWorkspace(false); });
+        return;
+      }
+      const workspace = workspaceResult.data;
+      setExisting(workspace);
+      if(workspace?.website) setWebsite(workspace.website);
+
+      const overview = overviewResult.ok ? overviewResult.data : null;
+      const setupComplete = Boolean(
+        workspace?.website &&
+        (overview?.monitor || Number(overview?.metrics?.competitors || 0) > 0)
+      );
+
+      if(setupComplete){
+        router.replace("/");
+        return;
+      }
+
+      if(workspace?.website){
+        setMessage("Your startup URL is saved. Continue setup from where you left off.");
+      }
+      setLoadingWorkspace(false);
+    }).catch(()=>{ if(alive) setLoadingWorkspace(false); });
     return ()=>{alive=false};
   },[router]);
 
@@ -48,20 +63,11 @@ export default function OnboardingPage() {
     e.preventDefault(); if(!website.trim()||busy) return;
     setBusy(true); setMessage(""); setSteps(baseSteps);
     try{
-      // Save the founder's URL before any slow external work. If the browser refreshes
-      // or a scan times out, the founder never has to enter setup data again.
       mark(0,"working");
       let res = await fetch("/api/radar/workspace",{
         method:"PATCH",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          ...(existing||{}),
-          name: existing?.name || "My startup",
-          website: website.trim(),
-          product_keywords: existing?.product_keywords || [],
-          capability_keywords: existing?.capability_keywords || [],
-          technology_keywords: existing?.technology_keywords || [],
-        })
+        body:JSON.stringify({ website: website.trim() })
       });
       let data = await res.json();
       if(!res.ok) throw new Error(data.error||"Could not save startup URL");
@@ -75,21 +81,27 @@ export default function OnboardingPage() {
       mark(1,"done",`Company Brain built for ${data.workspace?.name||"your startup"}`);
 
       mark(2,"working");
-      res = await fetch("/api/radar/discover",{method:"POST"}); data = await res.json(); if(!res.ok) throw new Error(data.error||"Discovery failed");
-      mark(2,"done",`${data.inspected||0} public results inspected across ${data.queries_generated||0} discovery paths`);
-      mark(3,"done",`${data.promoted||0} relevant competitors promoted into your RADAR`);
+      res = await fetch("/api/radar/discover",{method:"POST"}); data = await res.json();
+      if(!res.ok && !data?.cooldown) throw new Error(data.error||"Discovery failed");
+      if(data?.cooldown){
+        mark(2,"done","Recent discovery results already exist, so RADAR reused them.");
+        mark(3,"done","Existing competitive universe restored from your workspace.");
+      } else {
+        mark(2,"done",`${data.inspected||0} public results inspected across ${data.queries_generated||0} discovery paths`);
+        mark(3,"done",`${data.promoted||0} relevant competitors promoted into your RADAR`);
+      }
 
       mark(4,"working");
       const competitorsRes = await fetch("/api/radar/competitors",{cache:"no-store"});
       const competitors = competitorsRes.ok ? await competitorsRes.json() : [];
       const top = Array.isArray(competitors) ? competitors.slice(0,3) : [];
 
-      // These jobs are independent after discovery, so run them together instead of
-      // making founders wait for three serial deep scans plus monitor activation.
       const scanPromise = Promise.all(top.map(async competitor=>{
         try {
           const scan = await fetch("/api/radar/scan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({competitorId:competitor.id})});
-          return scan.ok;
+          if(scan.ok) return true;
+          const scanData = await scan.json().catch(()=>({}));
+          return Boolean(scanData?.cooldown);
         } catch { return false; }
       }));
       const monitorPromise = fetch("/api/radar/continuous",{method:"POST"})
@@ -99,12 +111,12 @@ export default function OnboardingPage() {
       const [scanResults,monitor] = await Promise.all([scanPromise,monitorPromise]);
       const scanned = scanResults.filter(Boolean).length;
       if(!monitor.ok) throw new Error(monitor.data?.error||"Could not activate continuous monitoring");
-      mark(4,"done",`${scanned} priority competitors deep-scanned. ${monitor.data?.alreadyActive?"Continuous discovery was already active":"Continuous discovery is active every 6 hours"}.`);
+      mark(4,"done",`${scanned} priority competitors ready. ${monitor.data?.alreadyActive?"Continuous discovery was already active":"Continuous discovery is active every 6 hours"}.`);
 
       setMessage("RADAR is ready. Your setup is saved and your competitive universe will keep updating as evidence arrives.");
-      setTimeout(()=>router.replace("/market"),350);
+      setTimeout(()=>router.replace("/"),350);
     }catch(err){
-      const text = err instanceof Error?err.message:"Setup failed"; setMessage(`${text}. Your saved setup will be waiting when you return.`);
+      const text = err instanceof Error?err.message:"Setup failed"; setMessage(`${text}. Your saved setup is safe. Press Build my RADAR again to resume.`);
       setSteps(prev=>prev.map(s=>s.status==="working"?{...s,status:"error"}:s));
     }finally{setBusy(false)}
   }
@@ -122,7 +134,7 @@ export default function OnboardingPage() {
     <form onSubmit={run} className="panel" style={{maxWidth:860,margin:"0 auto 18px",padding:20}}>
       <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
         <Globe2 size={18}/><input value={website} onChange={e=>setWebsite(e.target.value)} placeholder="yourstartup.com" required disabled={busy} style={{flex:1,minWidth:240,height:46,border:"1px solid #d8dcdf",borderRadius:10,padding:"0 14px",fontSize:14}}/>
-        <button disabled={busy} className="primary-button" style={{height:46}}>{busy?<><LoaderCircle size={15}/>Building RADAR...</>:<><Sparkles size={15}/>Build my RADAR</>}</button>
+        <button disabled={busy} className="primary-button" style={{height:46}}>{busy?<><LoaderCircle size={15}/>Building RADAR...</>:<><Sparkles size={15}/>{existing?.website?"Resume RADAR setup":"Build my RADAR"}</>}</button>
       </div>
       <div style={{marginTop:10,fontSize:12,color:"#72787d"}}>Your URL is persisted before scanning begins. Refreshing or signing in again will not erase saved setup.</div>
     </form>
@@ -135,6 +147,6 @@ export default function OnboardingPage() {
       </div>)}</div>
     </div>
 
-    {message?<div className="panel" style={{maxWidth:860,margin:"14px auto 0",padding:15,display:"flex",alignItems:"center",gap:10}}><ShieldCheck size={17}/><span style={{fontSize:13}}>{message}</span>{message.startsWith("RADAR is ready")?<button onClick={()=>router.replace("/market")} className="secondary-button" style={{marginLeft:"auto"}}>Open RADAR <ArrowRight size={14}/></button>:null}</div>:null}
+    {message?<div className="panel" style={{maxWidth:860,margin:"14px auto 0",padding:15,display:"flex",alignItems:"center",gap:10}}><ShieldCheck size={17}/><span style={{fontSize:13}}>{message}</span>{message.startsWith("RADAR is ready")?<button onClick={()=>router.replace("/")} className="secondary-button" style={{marginLeft:"auto"}}>Open RADAR <ArrowRight size={14}/></button>:null}</div>:null}
   </div></div>;
 }
