@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { createMonitor, firecrawlConfigured } from "@/lib/firecrawl";
 import { sbInsert, sbSelect } from "@/lib/radar-db";
+import { workspaceForRequest } from "@/lib/radar-workspace";
 
 function normalizeTerms(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(String).flatMap((x) => x.split(/[,;|]/)).map((x) => x.trim()).filter((x) => x.length > 2);
-  return String(value || "").split(/[,;|\n]/).map((x) => x.trim()).filter((x) => x.length > 2);
+  if (Array.isArray(value)) return value.map(String).flatMap(x => x.split(/[,;|]/)).map(x => x.trim()).filter(x => x.length > 2);
+  return String(value || "").split(/[,;|\n]/).map(x => x.trim()).filter(x => x.length > 2);
 }
-
 function buildQueries(workspace: any) {
   const product = normalizeTerms(workspace.product_keywords).slice(0, 5);
   const caps = normalizeTerms(workspace.capability_keywords).slice(0, 5);
@@ -23,23 +23,23 @@ function buildQueries(workspace: any) {
   return [...q].filter(Boolean).slice(0, 12);
 }
 
-export async function GET() {
-  const workspaces = await sbSelect("radar_workspaces?select=*&order=created_at.asc&limit=1");
-  const workspace = workspaces[0];
-  if (!workspace) return NextResponse.json({ configured: firecrawlConfigured(), monitor: null });
-  const monitors = await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&monitor_type=eq.web_discovery&select=*&order=created_at.desc&limit=1`);
-  return NextResponse.json({ configured: firecrawlConfigured(), monitor: monitors[0] || null });
+export async function GET(req: Request) {
+  try {
+    const { workspace } = await workspaceForRequest(req, true);
+    const monitors = await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&monitor_type=eq.web_discovery&select=*&order=created_at.desc&limit=1`);
+    return NextResponse.json({ configured: firecrawlConfigured(), monitor: monitors[0] || null });
+  } catch (error) {
+    if (error instanceof Error && error.message === "UNAUTHORIZED") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Monitor load failed" }, { status: 500 });
+  }
 }
 
 export async function POST(req: Request) {
   try {
     if (!firecrawlConfigured()) return NextResponse.json({ error: "FIRECRAWL_API_KEY is not configured." }, { status: 503 });
-    const workspaces = await sbSelect("radar_workspaces?select=*&order=created_at.asc&limit=1");
-    const workspace = workspaces[0];
-    if (!workspace) return NextResponse.json({ error: "Create Company Brain first." }, { status: 400 });
-
+    const { workspace } = await workspaceForRequest(req, true);
     const current = await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&monitor_type=eq.web_discovery&status=eq.active&select=*&limit=1`);
-    if (current[0]) return NextResponse.json({ ok: true, monitor: current[0], alreadyActive: true });
+    if (current[0]) return NextResponse.json({ ok:true, monitor:current[0], alreadyActive:true });
 
     const queries = buildQueries(workspace);
     if (!queries.length) return NextResponse.json({ error: "Add more Company Brain details before activating continuous discovery." }, { status: 400 });
@@ -55,27 +55,14 @@ export async function POST(req: Request) {
       targets: [{ type: "search", queries, searchWindow: "7d", maxResults: 20 }],
       goal,
       judgeEnabled: true,
-      webhook: {
-        url: webhookUrl,
-        events: ["monitor.page", "monitor.check.completed"],
-        headers: secret ? { "x-radar-webhook-secret": secret } : undefined,
-      },
+      webhook: { url: webhookUrl, events: ["monitor.page", "monitor.check.completed"], headers: secret ? { "x-radar-webhook-secret": secret } : undefined },
     });
 
     const providerId = created?.id || created?.data?.id || created?.monitor?.id;
-    const rows = await sbInsert("radar_monitors", {
-      workspace_id: workspace.id,
-      provider: "firecrawl",
-      provider_monitor_id: providerId || null,
-      monitor_type: "web_discovery",
-      name: `Continuous competitive discovery for ${workspace.name}`,
-      schedule_text: "every 6 hours",
-      goal,
-      status: "active",
-    });
-
-    return NextResponse.json({ ok: true, queries, monitor: rows[0], provider: created });
+    const rows = await sbInsert("radar_monitors", { workspace_id: workspace.id, provider:"firecrawl", provider_monitor_id:providerId || null, monitor_type:"web_discovery", name:`Continuous competitive discovery for ${workspace.name}`, schedule_text:"every 6 hours", goal, status:"active" });
+    return NextResponse.json({ ok:true, queries, monitor:rows[0] });
   } catch (error) {
+    if (error instanceof Error && error.message === "UNAUTHORIZED") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     return NextResponse.json({ error: error instanceof Error ? error.message : "Could not activate continuous RADAR" }, { status: 500 });
   }
 }
