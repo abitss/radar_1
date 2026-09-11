@@ -1,11 +1,13 @@
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
+const RADAR_API_SECRET = process.env.RADAR_API_SECRET!;
 
 function headers(extra: Record<string,string> = {}) {
   return {
     apikey: SUPABASE_KEY,
     Authorization: `Bearer ${SUPABASE_KEY}`,
     "Content-Type": "application/json",
+    "x-radar-api-key": RADAR_API_SECRET,
     ...extra,
   };
 }
