@@ -14,7 +14,6 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
 
   useEffect(() => {
@@ -22,11 +21,6 @@ export default function LoginPage() {
     if (params.get("verified") === "1") {
       setMode("login");
       setNotice({ kind: "success", text: "Email verified. Sign in with the password you created." });
-      window.history.replaceState({}, "", "/login");
-    }
-    if (params.get("reset") === "1") {
-      setMode("login");
-      setNotice({ kind: "success", text: "Password updated. Sign in with your new password." });
       window.history.replaceState({}, "", "/login");
     }
   }, []);
@@ -49,7 +43,7 @@ export default function LoginPage() {
         setNotice({
           kind: "error",
           text: /invalid login credentials/i.test(text)
-            ? "Email or password is incorrect. Check the password or use Forgot password."
+            ? "Email or password is incorrect. Check both and try again."
             : text,
         });
         return;
@@ -58,7 +52,7 @@ export default function LoginPage() {
       if (data?.needsVerification) {
         setMode("login");
         setPassword("");
-        setNotice({ kind: "success", text: data.message || "Account created. Verify your email, then sign in with the same password." });
+        setNotice({ kind: "success", text: data.message || "Account created. Verify your email, then return here and sign in with the same password." });
         return;
       }
 
@@ -71,36 +65,11 @@ export default function LoginPage() {
     }
   }
 
-  async function recoverPassword() {
-    if (!email.trim()) {
-      setNotice({ kind: "error", text: "Enter your email first, then choose Forgot password." });
-      return;
-    }
-    setRecoveryBusy(true);
-    setNotice(null);
-    try {
-      const res = await fetch("/api/auth/password-recovery", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok || data?.error) {
-        setNotice({ kind: "error", text: data?.error || "Could not send password reset email." });
-        return;
-      }
-      setNotice({ kind: "success", text: data?.message || "Password reset email sent." });
-    } catch {
-      setNotice({ kind: "error", text: "Could not send password reset email. Please try again." });
-    } finally {
-      setRecoveryBusy(false);
-    }
-  }
-
   function switchMode() {
     setMode(mode === "signup" ? "login" : "signup");
     setNotice(null);
     setPassword("");
+    setShowPassword(false);
   }
 
   return <main style={{minHeight:"100vh",display:"grid",placeItems:"center",background:"#e9ebed",padding:24,fontFamily:'"Avenir Next","Segoe UI",system-ui,sans-serif'}}>
@@ -115,7 +84,6 @@ export default function LoginPage() {
       <form onSubmit={submit} style={{display:"grid",gap:14}}>
         <label style={{display:"grid",gap:6,fontSize:12,color:"#555c62"}}>Email<input autoComplete="email" type="email" required value={email} onChange={e=>setEmail(e.target.value)} style={{height:46,border:"1px solid #d7dbde",borderRadius:10,padding:"0 13px",fontSize:14,outline:"none"}}/></label>
         <label style={{display:"grid",gap:6,fontSize:12,color:"#555c62"}}>Password<div style={{position:"relative"}}><input autoComplete={mode==="signup"?"new-password":"current-password"} type={showPassword?"text":"password"} required minLength={8} value={password} onChange={e=>setPassword(e.target.value)} style={{width:"100%",height:46,border:"1px solid #d7dbde",borderRadius:10,padding:"0 42px 0 13px",fontSize:14,outline:"none",boxSizing:"border-box"}}/><button type="button" aria-label={showPassword?"Hide password":"Show password"} onClick={()=>setShowPassword(v=>!v)} style={{position:"absolute",right:10,top:0,bottom:0,border:0,background:"transparent",display:"grid",placeItems:"center",color:"#737a80",cursor:"pointer"}}>{showPassword?<EyeOff size={17}/>:<Eye size={17}/>}</button></div></label>
-        {mode === "login" ? <button type="button" onClick={recoverPassword} disabled={recoveryBusy} style={{justifySelf:"end",border:0,background:"transparent",padding:0,color:"#5c6368",fontSize:12,cursor:recoveryBusy?"wait":"pointer"}}>{recoveryBusy?"Sending reset email...":"Forgot password?"}</button> : null}
         <button disabled={busy} style={{height:46,border:0,borderRadius:10,background:"#292e32",color:"#fff",fontWeight:600,cursor:busy?"wait":"pointer",opacity:busy?.72:1}}>{busy ? (mode === "signup" ? "Creating account..." : "Signing in...") : mode === "signup" ? "Create private RADAR" : "Sign in"}</button>
       </form>
 
