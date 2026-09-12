@@ -8,19 +8,37 @@ function normalizeTerms(value: unknown): string[] {
   return String(value || "").split(/[,;|\n]/).map(x => x.trim()).filter(x => x.length > 2);
 }
 function buildQueries(workspace: any) {
-  const product = normalizeTerms(workspace.product_keywords).slice(0, 5);
-  const caps = normalizeTerms(workspace.capability_keywords).slice(0, 5);
-  const tech = normalizeTerms(workspace.technology_keywords).slice(0, 3);
-  const customer = normalizeTerms(`${workspace.target_customers || ""},${workspace.buyer || ""}`).slice(0, 4);
-  const problem = normalizeTerms(workspace.problem_statement).slice(0, 5);
+  const product = normalizeTerms(workspace.product_keywords).slice(0, 6);
+  const features = normalizeTerms(workspace.major_features).slice(0, 5);
+  const caps = normalizeTerms(workspace.capability_keywords).slice(0, 7);
+  const tech = normalizeTerms(workspace.technology_keywords).slice(0, 4);
+  const customer = normalizeTerms(`${workspace.target_customers || ""},${workspace.buyer || ""}`).slice(0, 5);
+  const problem = normalizeTerms(workspace.problem_statement).slice(0, 6);
+  const industry = normalizeTerms(`${workspace.industry || ""},${workspace.sub_category || ""}`).slice(0, 4);
   const q = new Set<string>();
-  if (product.length) q.add(`${product.slice(0,3).join(" ")} startup competitor`);
-  if (product.length && customer.length) q.add(`${product.slice(0,2).join(" ")} ${customer.slice(0,2).join(" ")} company`);
-  if (problem.length) q.add(`startup solving ${problem.slice(0,4).join(" ")}`);
-  for (const cap of caps.slice(0,4)) q.add(`${cap} ${customer.slice(0,2).join(" ") || "startup company"}`);
-  for (const t of tech.slice(0,2)) q.add(`${t} ${product[0] || caps[0] || "startup"} company`);
-  if (workspace.name) q.add(`${workspace.name} alternatives competitors`);
-  return [...q].filter(Boolean).slice(0, 12);
+  if (product.length) {
+    q.add(`${product.slice(0,3).join(" ")} startup competitor`);
+    q.add(`${product.slice(0,2).join(" ")} alternatives company`);
+    q.add(`${product.slice(0,2).join(" ")} product launch startup`);
+    q.add(`${product.slice(0,2).join(" ")} pricing startup company`);
+  }
+  if (product.length && customer.length) {
+    q.add(`${product.slice(0,2).join(" ")} ${customer.slice(0,2).join(" ")} company`);
+    q.add(`${customer.slice(0,2).join(" ")} ${product[0]} new product`);
+  }
+  if (problem.length) {
+    q.add(`startup solving ${problem.slice(0,4).join(" ")}`);
+    q.add(`${problem.slice(0,3).join(" ")} company launch`);
+  }
+  for (const cap of [...features,...caps].slice(0,6)) q.add(`${cap} ${customer.slice(0,2).join(" ") || "startup company"}`);
+  for (const t of tech.slice(0,3)) q.add(`${t} ${product[0] || caps[0] || "startup"} company`);
+  if(industry.length) q.add(`${industry.slice(0,2).join(" ")} startup funding launch`);
+  if (workspace.geography && product.length) q.add(`${product.slice(0,2).join(" ")} startup ${workspace.geography}`);
+  if (workspace.name) {
+    q.add(`${workspace.name} alternatives competitors`);
+    q.add(`companies similar to ${workspace.name}`);
+  }
+  return [...q].filter(Boolean).slice(0, 20);
 }
 
 export async function GET(req: Request) {
@@ -47,12 +65,12 @@ export async function POST(req: Request) {
     const origin = new URL(req.url).origin;
     const webhookUrl = `${origin}/api/radar/firecrawl-webhook`;
     const secret = process.env.RADAR_API_SECRET || "";
-    const goal = `Detect new companies, products, technologies, partnerships, launches, funding, pricing, hiring, positioning or market activity that could compete with, substitute for, enable, or converge toward ${workspace.name}. Focus on the same problem, customer, buyer, workflow, capabilities, technologies, geography or business model. Ignore generic news and irrelevant matches.`;
+    const goal = `Continuously detect decision-relevant competitive movement around ${workspace.name}. Find newly appearing companies and products, product launches, feature changes, pricing changes, positioning shifts, customer wins, partnerships, hiring patterns, funding, geographic expansion, technology changes and go-to-market moves. Extract the real company and exact related product. Prioritize product overlap, customer overlap and strategic convergence. Ignore generic news, duplicate articles, cosmetic edits and unrelated companies.`;
 
     const created = await createMonitor({
-      name: `RADAR · ${workspace.name} · continuous competitive discovery`,
-      schedule: { text: "every 6 hours", timezone: "UTC" },
-      targets: [{ type: "search", queries, searchWindow: "7d", maxResults: 20 }],
+      name: `RADAR · ${workspace.name} · high-frequency competitive watch`,
+      schedule: { text: "every hour", timezone: "UTC" },
+      targets: [{ type: "search", queries, searchWindow: "24h", maxResults: 30 }],
       goal,
       judgeEnabled: true,
       webhook: { url: webhookUrl, events: ["monitor.page", "monitor.check.completed"], headers: secret ? { "x-radar-webhook-secret": secret } : undefined },
@@ -60,7 +78,7 @@ export async function POST(req: Request) {
     });
 
     const providerId = created?.id || created?.data?.id || created?.monitor?.id;
-    const rows = await sbInsert("radar_monitors", { workspace_id: workspace.id, provider:"firecrawl", provider_monitor_id:providerId || null, monitor_type:"web_discovery", name:`Continuous competitive discovery for ${workspace.name}`, schedule_text:"every 6 hours", goal, status:"active" });
+    const rows = await sbInsert("radar_monitors", { workspace_id: workspace.id, provider:"firecrawl", provider_monitor_id:providerId || null, monitor_type:"web_discovery", name:`High-frequency competitive watch for ${workspace.name}`, schedule_text:"every hour", goal, status:"active" });
     return NextResponse.json({ ok:true, queries, monitor:rows[0] });
   } catch (error) {
     if (error instanceof Error && error.message === "UNAUTHORIZED") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
