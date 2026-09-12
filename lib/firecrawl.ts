@@ -41,8 +41,6 @@ function searchRows(payload: any): FirecrawlSearchResult[] {
   return Array.isArray(rows) ? rows.filter((row) => row?.url) : [];
 }
 
-// Fast discovery path: search metadata only. This avoids scraping every result page
-// before we even know whether the company is relevant.
 export async function searchWebFast(query: string, limit = 5): Promise<FirecrawlSearchResult[]> {
   const payload = await firecrawlRequest("/search", {
     query,
@@ -53,7 +51,6 @@ export async function searchWebFast(query: string, limit = 5): Promise<Firecrawl
   return searchRows(payload);
 }
 
-// Evidence path: search + scrape content. Use this only for high-value deep scans.
 export async function searchWeb(query: string, limit = 6): Promise<FirecrawlSearchResult[]> {
   const payload = await firecrawlRequest("/search", {
     query,
@@ -75,16 +72,26 @@ export async function scrapeCompanyProfile(url: string) {
     properties: {
       company_name: { type: "string" },
       one_line_description: { type: "string" },
+      industry: { type: "string" },
+      sub_category: { type: "string" },
       problem_statement: { type: "string" },
       target_customers: { type: "string" },
       buyer: { type: "string" },
       product_keywords: { type: "array", items: { type: "string" } },
       capability_keywords: { type: "array", items: { type: "string" } },
       technology_keywords: { type: "array", items: { type: "string" } },
+      major_features: { type: "array", items: { type: "string" } },
       geography: { type: "string" },
       business_model: { type: "string" },
+      pricing_context: { type: "string" },
+      positioning: { type: "string" },
+      public_team_facts: { type: "string" },
     },
-    required: ["company_name","one_line_description","problem_statement","target_customers","buyer","product_keywords","capability_keywords","technology_keywords","geography","business_model"],
+    required: [
+      "company_name","one_line_description","industry","sub_category","problem_statement","target_customers","buyer",
+      "product_keywords","capability_keywords","technology_keywords","major_features","geography","business_model",
+      "pricing_context","positioning","public_team_facts"
+    ],
   };
 
   const payload = await firecrawlRequest("/scrape", {
@@ -94,7 +101,7 @@ export async function scrapeCompanyProfile(url: string) {
       {
         type: "json",
         schema,
-        prompt: "Understand this startup for competitive intelligence. Extract only claims supported by the public page. Use concise phrases. Product keywords should describe products/categories, capability keywords should describe features/workflows, and technology keywords should describe explicit or strongly evidenced technology. Do not invent missing facts; use empty strings or arrays when uncertain."
+        prompt: "Build an evidence-grounded company profile for competitive intelligence. Extract only claims supported by this public page. Identify industry, sub-category, products/services, problem/use case, target customers, likely buyer only when supported, geography, business model, pricing or price-band evidence, technologies, major features, positioning/messaging and relevant public team/company facts. Use concise phrases. Do not invent missing facts. Return empty strings or arrays when uncertain."
       }
     ],
     onlyMainContent: true,
