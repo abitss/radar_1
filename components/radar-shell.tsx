@@ -3,11 +3,11 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
-import { Bell, Building2, Compass, FileText, LogOut, Radar, Search, Settings, Signal, Sparkles, Target, Home } from "lucide-react";
+import { Bell, Building2, Compass, FileText, LogOut, Radar, Search, Settings, Signal, Sparkles, Target, Home, Activity } from "lucide-react";
 import { RadarLogo } from "@/components/radar-logo";
 import { RadarAutoSetup } from "@/components/radar-auto-setup";
 
-type MainKey = "dashboard" | "discover" | "radar" | "competitors" | "signals" | "decisions" | "briefings" | "settings";
+type MainKey = "dashboard" | "discover" | "radar" | "competitors" | "signals" | "decisions" | "briefings" | "sources" | "settings";
 type NavItem = { label: string; href: string; icon: LucideIcon; key: MainKey; hint: string };
 
 const primaryNav: NavItem[] = [
@@ -20,6 +20,7 @@ const primaryNav: NavItem[] = [
   { label: "Briefings", href: "/briefings", icon: FileText, key: "briefings", hint: "Daily, weekly and monthly founder intelligence summaries." },
 ];
 
+const sourcesNav: NavItem = { label: "Sources & Alerts", href: "/sources", icon: Activity, key: "sources", hint: "Source coverage, monitor health and alert readiness." };
 const settingsNav: NavItem = { label: "Settings", href: "/settings", icon: Settings, key: "settings", hint: "Company Brain, monitoring, sources and workspace controls." };
 
 function activeSection(pathname: string): MainKey | null {
@@ -30,7 +31,8 @@ function activeSection(pathname: string): MainKey | null {
   if (pathname === "/signals" || pathname.startsWith("/signals/")) return "signals";
   if (["/decisions", "/actions", "/outcomes"].some(p => pathname === p || pathname.startsWith(`${p}/`))) return "decisions";
   if (pathname === "/briefings" || pathname.startsWith("/briefings/")) return "briefings";
-  if (["/settings", "/brain", "/sources", "/system-health"].some(p => pathname === p || pathname.startsWith(`${p}/`))) return "settings";
+  if (pathname === "/sources" || pathname.startsWith("/sources/")) return "sources";
+  if (["/settings", "/brain", "/system-health"].some(p => pathname === p || pathname.startsWith(`${p}/`))) return "settings";
   return null;
 }
 
@@ -70,7 +72,7 @@ export function RadarShell({ children }: { children: React.ReactNode }) {
         <div className="brand-row radar-reference-brand"><Link href="/" aria-label="RADAR home" style={{textDecoration:"none"}} className="radar-logo-link"><RadarLogo/></Link></div>
         <nav className="nav-list radar-reference-nav radar-simple-nav" aria-label="RADAR main navigation">{primaryNav.map(item => <NavLink key={item.href} item={item} current={current}/>)}</nav>
         <div className="radar-sidebar-divider"/>
-        <nav className="nav-list radar-reference-nav secondary radar-simple-nav" aria-label="Workspace navigation"><NavLink item={settingsNav} current={current}/></nav>
+        <nav className="nav-list radar-reference-nav secondary radar-simple-nav" aria-label="Workspace navigation"><NavLink item={sourcesNav} current={current}/><NavLink item={settingsNav} current={current}/></nav>
         <div className="radar-sidebar-promo founder-promo">
           <div className="radar-promo-copy">Know sooner.<br/>Decide better.</div>
           <div className="radar-mountain-mini" aria-hidden="true"><span className="peak p1"/><span className="peak p2"/><span className="peak p3"/></div>
