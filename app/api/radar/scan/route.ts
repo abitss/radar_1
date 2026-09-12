@@ -10,6 +10,7 @@ function normalizeTerms(value: unknown): string[] {
 function termScore(text: string, terms: string[]) { const unique=[...new Set(terms)]; return unique.length?Math.round((unique.filter(term=>text.includes(term)).length/unique.length)*100):0; }
 function classify(score:number, productOverlap:number){ if(productOverlap>=78&&score>=62)return"direct"; if(productOverlap>=55||score>=55)return"adjacent"; if(productOverlap>=32||score>=30)return"micro"; return"emerging"; }
 function domainOf(raw:string){ try{return new URL(raw).hostname.replace(/^www\./,"").toLowerCase()}catch{return""} }
+function severityFor(impact:number){return impact>=90?"critical":impact>=75?"high":impact>=55?"watch":"info"}
 
 export async function POST(req: Request) {
   try {
@@ -30,19 +31,8 @@ export async function POST(req: Request) {
     const founderFeatures=[...normalizeTerms(workspace.major_features),...normalizeTerms(workspace.capability_keywords)].slice(0,5).join(" ");
     const productAnchor=relatedProduct||founderProducts||competitor.name;
     const queries=quick
-      ? [
-          `site:${domain} ${productAnchor} product features`,
-          `site:${domain} ${productAnchor} pricing customers use case`,
-          `site:${domain} ${founderProducts} ${founderFeatures}`,
-        ]
-      : [
-          `site:${domain} ${productAnchor} product features capabilities`,
-          `site:${domain} ${productAnchor} pricing plans packaging`,
-          `site:${domain} ${productAnchor} customers use cases creators`,
-          `site:${domain} ${productAnchor} docs technology AI autonomous`,
-          `site:${domain} ${productAnchor} integrations partners launch`,
-          `site:${domain} ${founderProducts} ${founderFeatures}`,
-        ];
+      ? [`site:${domain} ${productAnchor} product features`,`site:${domain} ${productAnchor} pricing customers use case`,`site:${domain} ${founderProducts} ${founderFeatures}`]
+      : [`site:${domain} ${productAnchor} product features capabilities`,`site:${domain} ${productAnchor} pricing plans packaging`,`site:${domain} ${productAnchor} customers use cases creators`,`site:${domain} ${productAnchor} docs technology AI autonomous`,`site:${domain} ${productAnchor} integrations partners launch`,`site:${domain} ${founderProducts} ${founderFeatures}`];
 
     const searchSets = await Promise.allSettled(queries.map(q=>searchWeb(q,quick?3:4)));
     const pages:any[]=[]; const seen=new Set<string>();
@@ -86,6 +76,7 @@ export async function POST(req: Request) {
     await Promise.all([
       sbUpdate("radar_competitors",`id=eq.${competitor.id}`,{previous_similarity_score:previous,similarity_score:weighted,product_overlap_score:productOverlap,relation_confidence:Math.max(Number(competitor.relation_confidence||0),confidence),threat_score:threat,momentum_score:Math.min(100,momentumBase+Math.abs(weighted-previous)),movement,category,why_it_matters:why,last_scanned_at:new Date().toISOString(),updated_at:new Date().toISOString()}),
       sbInsert("radar_signals",{workspace_id:workspace.id,competitor_id:competitor.id,signal_type:movement==="closer"?"competitive_convergence":"product_intelligence",title:movement==="closer"?`${competitor.name} moved closer through ${productLabel}`:`${competitor.name}: ${productOverlap}% product overlap`,summary:why,impact_score:threat,confidence,status:"new"}),
+      sbInsert("radar_intelligence_events",{workspace_id:workspace.id,competitor_id:competitor.id,event_type:movement==="closer"?"competitive_convergence":"deep_scan",severity:severityFor(threat),title:movement==="closer"?`${competitor.name} moved closer`:`${competitor.name} intelligence refreshed`,summary:why,source_url:limitedPages[0]?.url||competitor.website,confidence,impact_score:threat,dedupe_key:`deep_scan:${competitor.id}:${new Date().toISOString().slice(0,13)}`}),
       (productOverlap>=35||weighted>=45||movement==="closer") ? sbInsert("radar_recommendations",{workspace_id:workspace.id,competitor_id:competitor.id,priority:productOverlap>=75||threat>=80?"high":productOverlap>=50||weighted>=55?"medium":"low",title:`Review ${competitor.name}'s ${productLabel}`,rationale:why,action:productOverlap>=70?"Compare product promise, autonomous capabilities, target user, pricing, camera/AI workflow and differentiation before the next product or GTM decision.":"Review the overlapping product capabilities and decide whether this product belongs in active surveillance."}) : Promise.resolve(null),
     ]);
 
@@ -95,11 +86,10 @@ export async function POST(req: Request) {
       monitorActive = Boolean(existingMonitor[0]);
       if(!existingMonitor[0]&&limitedPages.length){
         const urls=[...new Set(limitedPages.map(p=>p.url).filter((u:string)=>domainOf(u)===domain))].slice(0,10);
-        const schedule=threat>=80?"every 6 hours":threat>=55?"every 12 hours":"daily";
         const secret=process.env.RADAR_API_SECRET||"";
-        const created=await createMonitor({name:`RADAR · ${competitor.name} · ${productLabel}`,schedule:{text:schedule,timezone:"UTC"},targets:[{type:"scrape",urls,scrapeOptions:{}}],goal:`Watch ${competitor.name}'s ${productLabel} for meaningful changes in product capabilities, autonomous behavior, AI/technology, target customers, use cases, camera/creator workflow, pricing, positioning, launches and partnerships. Ignore unrelated products and cosmetic page edits.`,judgeEnabled:true,webhook:{url:`${new URL(req.url).origin}/api/radar/firecrawl-webhook`,events:["monitor.page","monitor.check.completed"],headers:secret?{"x-radar-webhook-secret":secret}:undefined}});
+        const created=await createMonitor({name:`RADAR · ${competitor.name} · ${productLabel}`,schedule:{text:"every hour",timezone:"UTC"},targets:[{type:"scrape",urls,scrapeOptions:{}}],goal:`Watch ${competitor.name}'s ${productLabel} for meaningful changes in product capabilities, autonomous behavior, AI/technology, target customers, use cases, camera/creator workflow, pricing, positioning, launches and partnerships. Ignore unrelated products and cosmetic page edits.`,judgeEnabled:true,webhook:{url:`${new URL(req.url).origin}/api/radar/firecrawl-webhook`,events:["monitor.page","monitor.check.completed"],headers:secret?{"x-radar-webhook-secret":secret}:undefined}});
         const providerId=created?.id||created?.data?.id||created?.monitor?.id;
-        await sbInsert("radar_monitors",{workspace_id:workspace.id,competitor_id:competitor.id,provider:"firecrawl",provider_monitor_id:providerId||null,monitor_type:"entity_surveillance",name:`Product surveillance: ${competitor.name} · ${productLabel}`,schedule_text:schedule,goal:`Meaningful changes to ${productLabel}`,status:"active"});
+        await sbInsert("radar_monitors",{workspace_id:workspace.id,competitor_id:competitor.id,provider:"firecrawl",provider_monitor_id:providerId||null,monitor_type:"entity_surveillance",name:`Product surveillance: ${competitor.name} · ${productLabel}`,schedule_text:"every hour",goal:`Meaningful changes to ${productLabel}`,status:"active"});
         monitorActive = true;
       }
     }
