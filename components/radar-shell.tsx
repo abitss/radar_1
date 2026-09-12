@@ -11,7 +11,7 @@ type MainKey = "today" | "radar" | "competitors" | "signals" | "decisions" | "se
 type NavItem = { label: string; href: string; icon: LucideIcon; key: MainKey; hint: string };
 
 const primaryNav: NavItem[] = [
-  { label: "Today", href: "/", icon: Home, key: "today", hint: "What changed and what deserves founder attention." },
+  { label: "Dashboard", href: "/", icon: Home, key: "today", hint: "What changed and what deserves founder attention." },
   { label: "RADAR", href: "/market", icon: Radar, key: "radar", hint: "Your living competitive map." },
   { label: "Competitors", href: "/companies", icon: Building2, key: "competitors", hint: "Every direct, adjacent, micro and emerging competitor." },
   { label: "Signals", href: "/signals", icon: Signal, key: "signals", hint: "Evidence-backed changes detected across the market." },
@@ -32,7 +32,7 @@ function activeSection(pathname: string): MainKey | null {
 
 function NavLink({ item, current }: { item: NavItem; current: MainKey | null }) {
   const Icon = item.icon;
-  return <Link href={item.href} className={`nav-item ${current === item.key ? "active" : ""}`} title={item.hint}><Icon size={17} strokeWidth={1.8}/><span>{item.label}</span></Link>;
+  return <Link href={item.href} style={{textDecoration:"none"}} className={`nav-item ${current === item.key ? "active" : ""}`} title={item.hint}><Icon size={17} strokeWidth={1.8}/><span>{item.label}</span></Link>;
 }
 
 export function RadarShell({ children }: { children: React.ReactNode }) {
@@ -49,8 +49,21 @@ export function RadarShell({ children }: { children: React.ReactNode }) {
 
   return (
     <main className="app-shell radar-reference-shell">
+      <style>{`
+        .radar-reference-shell a,
+        .radar-reference-shell a:link,
+        .radar-reference-shell a:visited,
+        .radar-reference-shell a:hover,
+        .radar-reference-shell a:active,
+        .radar-reference-shell a *,
+        .radar-logo-link,
+        .radar-logo-link * {
+          text-decoration: none !important;
+          text-decoration-line: none !important;
+        }
+      `}</style>
       <aside className="sidebar radar-reference-sidebar">
-        <div className="brand-row radar-reference-brand"><Link href="/" aria-label="RADAR home" className="radar-logo-link"><RadarLogo/></Link></div>
+        <div className="brand-row radar-reference-brand"><Link href="/" aria-label="RADAR home" style={{textDecoration:"none"}} className="radar-logo-link"><RadarLogo/></Link></div>
         <nav className="nav-list radar-reference-nav radar-simple-nav" aria-label="RADAR main navigation">{primaryNav.map(item => <NavLink key={item.href} item={item} current={current}/>)}</nav>
         <div className="radar-sidebar-divider"/>
         <nav className="nav-list radar-reference-nav secondary radar-simple-nav" aria-label="Workspace navigation"><NavLink item={settingsNav} current={current}/></nav>
@@ -63,16 +76,16 @@ export function RadarShell({ children }: { children: React.ReactNode }) {
 
       <section className="main-panel radar-reference-main">
         <header className="topbar radar-reference-topbar">
-          <Link href="/ask" className="command-search radar-reference-search founder-search" aria-label="Ask RADAR"><Search size={18} strokeWidth={1.8}/><span>Ask RADAR about competitors, signals or decisions...</span><kbd>⌘ K</kbd></Link>
+          <Link href="/ask" style={{textDecoration:"none"}} className="command-search radar-reference-search founder-search" aria-label="Ask RADAR"><Search size={18} strokeWidth={1.8}/><span>Ask RADAR about competitors, signals or decisions...</span><kbd>⌘ K</kbd></Link>
           <div className="top-actions radar-reference-actions">
-            <Link href="/signals" className="icon-button radar-bell" aria-label="New signals"><Bell size={18} strokeWidth={1.8}/><span className="notification-dot"/></Link>
+            <Link href="/signals" style={{textDecoration:"none"}} className="icon-button radar-bell" aria-label="New signals"><Bell size={18} strokeWidth={1.8}/><span className="notification-dot"/></Link>
             <div className="radar-top-divider"/>
             <button onClick={logout} className="profile-button radar-profile" title="Sign out"><span>F</span><div><strong>Founder</strong><small>Private workspace</small></div><LogOut size={15} strokeWidth={1.8}/></button>
           </div>
         </header>
         <RadarAutoSetup/>
         {children}
-        <Link href="/ask" className={`radar-ai-fab ${pathname === "/ask" ? "active" : ""}`} aria-label="Ask RADAR" title="Ask RADAR"><span className="radar-ai-fab-glyph"><Sparkles size={27} strokeWidth={1.8}/></span></Link>
+        <Link href="/ask" style={{textDecoration:"none"}} className={`radar-ai-fab ${pathname === "/ask" ? "active" : ""}`} aria-label="Ask RADAR" title="Ask RADAR"><span className="radar-ai-fab-glyph"><Sparkles size={27} strokeWidth={1.8}/></span></Link>
       </section>
     </main>
   );
