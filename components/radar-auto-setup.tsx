@@ -24,22 +24,21 @@ export function RadarAutoSetup({ disabled = false }: { disabled?: boolean }) {
     async function run(){
       try{
         const first = await json("/api/radar/overview");
-        if(!first.res.ok || !first.data?.workspace?.website) return;
+        if(!first.res.ok) return;
+        if(!first.data?.workspace?.website){
+          if(alive){ setStatus("error"); setMessage("Complete startup setup first. RADAR needs your website before automatic discovery can begin."); }
+          return;
+        }
 
         const workspace = first.data.workspace;
         const brainReady = Boolean(
-          workspace.description ||
-          workspace.problem_statement ||
-          workspace.product_keywords?.length ||
-          workspace.capability_keywords?.length
+          workspace.description || workspace.problem_statement || workspace.product_keywords?.length ||
+          workspace.capability_keywords?.length || workspace.industry || workspace.sub_category
         );
-        const competitorsReady = Number(first.data?.metrics?.competitors || 0) > 0;
-        const monitorReady = Boolean(first.data?.monitor);
-        if(brainReady && competitorsReady && monitorReady) return;
 
         if(alive){
           setStatus("working");
-          setMessage("RADAR is scanning in fast mode. You can keep using the app.");
+          setMessage("RADAR is building your Company Brain and searching the public web for competitors. You can keep using the app.");
         }
 
         if(!brainReady){
@@ -52,14 +51,22 @@ export function RadarAutoSetup({ disabled = false }: { disabled?: boolean }) {
         }
 
         let overview = (await json("/api/radar/overview")).data;
-        if(Number(overview?.metrics?.competitors || 0) === 0){
-          const discover = await json("/api/radar/discover",{method:"POST"});
+        const competitorsBefore = Number(overview?.metrics?.competitors || 0);
+        if(competitorsBefore < 5){
+          if(alive) setMessage("Company Brain ready. Searching multiple public-web discovery paths for direct, adjacent, micro and emerging competitors...");
+          const discover = await json("/api/radar/discover",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({force:competitorsBefore===0})});
           if(!discover.res.ok && !discover.data?.cooldown) throw new Error(discover.data?.error || "Market discovery failed");
         }
 
         const competitorsResult = await json("/api/radar/competitors");
-        const competitors = Array.isArray(competitorsResult.data) ? competitorsResult.data.slice(0,2) : [];
-        await Promise.all(competitors.map(async (competitor:any)=>{
+        const competitors = Array.isArray(competitorsResult.data) ? competitorsResult.data : [];
+        const toScan = competitors
+          .filter((c:any)=>!c.last_scanned_at)
+          .sort((a:any,b:any)=>Number(b.threat_score||b.similarity_score||0)-Number(a.threat_score||a.similarity_score||0))
+          .slice(0,5);
+
+        if(toScan.length && alive) setMessage(`Found ${competitors.length} tracked companies. Verifying similarity and threat for the top ${toScan.length}...`);
+        await Promise.all(toScan.map(async (competitor:any)=>{
           try{
             const scan = await json("/api/radar/scan",{
               method:"POST",
@@ -72,20 +79,23 @@ export function RadarAutoSetup({ disabled = false }: { disabled?: boolean }) {
 
         overview = (await json("/api/radar/overview")).data;
         if(!overview?.monitor){
+          if(alive) setMessage("Initial competitor map ready. Activating continuous discovery...");
           const monitor = await json("/api/radar/continuous",{method:"POST"});
           if(!monitor.res.ok) throw new Error(monitor.data?.error || "Continuous monitoring could not start");
         }
 
+        const finalOverview=(await json("/api/radar/overview")).data;
+        const total=Number(finalOverview?.metrics?.competitors||0);
         if(alive){
           setStatus("done");
-          setMessage("Initial RADAR scan is ready. Deeper evidence will accumulate automatically.");
-          await sleep(3500);
+          setMessage(total?`RADAR is active with ${total} tracked compan${total===1?"y":"ies"}. Similarity, threat and evidence will keep updating automatically.`:"Discovery completed, but no relevant companies were verified yet. RADAR will keep searching continuously.");
+          await sleep(5000);
           if(alive) setStatus("idle");
         }
       }catch(error){
         if(alive){
           setStatus("error");
-          setMessage(error instanceof Error ? `${error.message}. Your saved setup is safe.` : "Background setup paused. Your saved setup is safe.");
+          setMessage(error instanceof Error ? `${error.message}. Your saved setup is safe; retry from Discover.` : "Background intelligence setup paused. Your saved setup is safe.");
         }
       }
     }
