@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, BrainCircuit, LoaderCircle, Radar, ShieldCheck } from "lucide-react";
+import { Activity, BrainCircuit, CheckCircle2, Circle, LoaderCircle, Radar, ShieldCheck } from "lucide-react";
 import { PageIntro } from "@/components/intelligence-ui";
 import { StartupProfileForm } from "@/components/startup-profile-form";
 
@@ -35,7 +35,7 @@ export default function SettingsPage(){
   }
 
   return <div className="content">
-    <PageIntro eyebrow="WORKSPACE CONTROL" title="Settings" description="Your Company Brain determines what RADAR considers relevant. Monitoring and AI status show whether the intelligence stack is ready."/>
+    <PageIntro eyebrow="WORKSPACE CONTROL" title="Settings" description="Your Company Brain determines what RADAR considers relevant. Monitoring, AI and beta readiness show whether the intelligence stack is truly usable."/>
     <section className="founder-two-col" style={{marginBottom:13}}>
       <article className="panel founder-panel">
         <div className="founder-panel-head"><div><span>SURVEILLANCE STATUS</span><h2>{monitor===undefined?"Checking…":monitor?"Continuous RADAR is active":"Continuous RADAR is not active"}</h2></div><Activity size={21}/></div>
@@ -49,11 +49,16 @@ export default function SettingsPage(){
         <div className="founder-action-block"><span>FAIL-SAFE</span><strong>If AI fails or rate-limits, RADAR falls back to stored evidence instead of breaking.</strong></div>
       </article>
     </section>
+
     <section className="panel founder-panel" style={{marginBottom:13}}>
-      <div className="founder-panel-head"><div><span>LAUNCH STATUS</span><h2>{system?.launch_ready?"Core intelligence stack ready":"Core setup still incomplete"}</h2></div><ShieldCheck size={21}/></div>
-      <p>Web intelligence: {system?.firecrawl?.configured?"ready":"not configured"} · AI: {system?.ai?.configured?"ready":"not configured"} · Continuous monitor: {system?.monitoring?.active?"active":"not active yet"}.</p>
+      <div className="founder-panel-head"><div><span>CLOSED BETA READINESS</span><h2>{system?.beta?`${system.beta.percent}% of the product loop is proven in this workspace`:"Checking product loop..."}</h2></div><ShieldCheck size={21}/></div>
+      <p>This is based on the actual RADAR beta definition, not decorative system status.</p>
+      <div style={{height:8,borderRadius:999,background:"#e8ebed",overflow:"hidden",margin:"14px 0 16px"}}><div style={{height:"100%",width:`${system?.beta?.percent||0}%`,background:"#202428",transition:"width .3s ease"}}/></div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:8}}>{(system?.beta?.checks||[]).map((check:any)=><div key={check.key} style={{display:"flex",gap:9,alignItems:"center",padding:"10px 12px",border:"1px solid #e1e4e6",borderRadius:10,fontSize:12,color:check.done?"#24292d":"#71787e",background:check.done?"#fafbfb":"#fff"}}>{check.done?<CheckCircle2 size={15}/>:<Circle size={15}/>}<span>{check.label}</span></div>)}</div>
+      {system?.beta?<div style={{marginTop:12,fontSize:11,color:"#757c81"}}>{system.beta.completed} of {system.beta.total} closed-beta checks completed in this workspace.</div>:null}
     </section>
+
     <StartupProfileForm/>
-    <section className="panel founder-panel" style={{marginTop:13}}><div className="founder-panel-head"><div><span>HOW RADAR WORKS</span><h2>Discovery → evidence → decision</h2></div><Radar size={21}/></div><p>Editing the Company Brain changes future discovery and scoring. Use “Refresh competitive universe” after a major positioning, customer or product change.</p></section>
+    <section className="panel founder-panel" style={{marginTop:13}}><div className="founder-panel-head"><div><span>HOW RADAR WORKS</span><h2>Discover → Understand → Monitor → Interpret → Act</h2></div><Radar size={21}/></div><p>Editing the Company Brain changes future discovery and scoring. Refresh the competitive universe after a major positioning, customer, pricing or product change.</p></section>
   </div>;
 }
