@@ -72,7 +72,10 @@ export default function OnboardingPage(){
       });
       const data=await res.json().catch(()=>({}));
       if(!res.ok) throw new Error(data.error||"Could not save your workspace.");
-      router.replace("/");
+
+      // The dashboard owns the long-running initialization request so it survives
+      // navigation and can show live progress while the founder starts using RADAR.
+      router.replace("/?initialize=1");
       router.refresh();
     }catch(err){setError(err instanceof Error?err.message:"Setup failed");setBusy(false)}
   }
@@ -83,7 +86,7 @@ export default function OnboardingPage(){
     <section style={{width:"100%",maxWidth:860,margin:"0 auto",background:"#fff",border:"1px solid #d8dcdf",borderRadius:20,boxShadow:"0 26px 80px rgba(0,0,0,.08)",overflow:"hidden"}}>
       <div style={{padding:"30px 34px 24px",borderBottom:"1px solid #e4e7e9",display:"flex",gap:16,alignItems:"flex-start"}}>
         <div style={{width:46,height:46,borderRadius:13,display:"grid",placeItems:"center",background:"#252a2e",color:"#fff",flex:"0 0 auto"}}><Radar size={24}/></div>
-        <div><div style={{fontSize:11,letterSpacing:".14em",color:"#70777d",marginBottom:7}}>WELCOME TO RADAR</div><h1 style={{fontSize:30,lineHeight:1.08,letterSpacing:"-.04em",fontWeight:520,margin:"0 0 8px",color:"#15191c"}}>Set up your founder workspace.</h1><p style={{margin:0,color:"#697076",fontSize:14,lineHeight:1.55}}>Tell RADAR who you are and what you are building. We save this once, then your competitive intelligence starts automatically.</p></div>
+        <div><div style={{fontSize:11,letterSpacing:".14em",color:"#70777d",marginBottom:7}}>WELCOME TO RADAR</div><h1 style={{fontSize:30,lineHeight:1.08,letterSpacing:"-.04em",fontWeight:520,margin:"0 0 8px",color:"#15191c"}}>Set up your founder workspace.</h1><p style={{margin:0,color:"#697076",fontSize:14,lineHeight:1.55}}>Add your company once. RADAR will immediately build your Company Brain, search broad public/indexable web sources, identify real competing companies and products, calculate similarity and threat, deep-scan the strongest matches, activate monitoring and create your first founder briefing.</p></div>
       </div>
 
       <form onSubmit={submit} style={{padding:34,display:"grid",gap:26}}>
@@ -108,7 +111,7 @@ export default function OnboardingPage(){
 
         {error?<div style={{fontSize:12,padding:"11px 12px",border:"1px solid #ead2d2",borderRadius:10,background:"#f7eeee",color:"#8a3d3d"}}>{error}</div>:null}
 
-        <div style={{display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",paddingTop:4}}><span style={{fontSize:12,color:"#737a80"}}>Your data stays attached to your private RADAR workspace.</span><button disabled={busy} className="primary-button" style={{height:46,minWidth:170}}>{busy?<><LoaderCircle size={15}/>Saving...</>:<>Enter RADAR <ArrowRight size={15}/></>}</button></div>
+        <div style={{display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",paddingTop:4}}><span style={{fontSize:12,color:"#737a80"}}>No second setup step. Intelligence generation starts automatically after this form.</span><button disabled={busy} className="primary-button" style={{height:46,minWidth:190}}>{busy?<><LoaderCircle size={15}/>Starting RADAR...</>:<>Start intelligence scan <ArrowRight size={15}/></>}</button></div>
       </form>
     </section>
   </main>;
