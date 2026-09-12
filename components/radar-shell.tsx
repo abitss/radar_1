@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
-import { Bell, Building2, Compass, FileText, LogOut, Radar, Search, Settings, Signal, Sparkles, Target, Home, Activity } from "lucide-react";
+import { Bell, Building2, Compass, FileText, LogOut, Radar, Search, Settings, Signal, Sparkles, Target, Home, Activity, LoaderCircle } from "lucide-react";
 import { RadarLogo } from "@/components/radar-logo";
 import { RadarAutoSetup } from "@/components/radar-auto-setup";
 
@@ -44,7 +45,27 @@ function NavLink({ item, current }: { item: NavItem; current: MainKey | null }) 
 export function RadarShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  if (pathname === "/login" || pathname === "/onboarding") return <>{children}</>;
+  const [checking,setChecking]=useState(pathname!=="/login"&&pathname!=="/onboarding");
+  const publicRoute=pathname === "/login" || pathname === "/onboarding";
+
+  useEffect(()=>{
+    if(publicRoute){setChecking(false);return;}
+    let alive=true;
+    fetch("/api/radar/workspace",{cache:"no-store"})
+      .then(async r=>({ok:r.ok,data:await r.json().catch(()=>({}))}))
+      .then(({ok,data})=>{
+        if(!alive)return;
+        if(!ok){router.replace("/login");return;}
+        if(!data?.onboarding_completed || !data?.website){router.replace("/onboarding");return;}
+        setChecking(false);
+      })
+      .catch(()=>{if(alive)setChecking(false)});
+    return()=>{alive=false};
+  },[pathname,publicRoute,router]);
+
+  if (publicRoute) return <>{children}</>;
+  if(checking) return <main style={{minHeight:"100vh",display:"grid",placeItems:"center",background:"#e9ebed",color:"#5f666b",fontFamily:'"Avenir Next","Segoe UI",system-ui,sans-serif'}}><div style={{display:"flex",gap:10,alignItems:"center",fontSize:13}}><LoaderCircle size={18}/>Opening your RADAR workspace...</div></main>;
+
   const current = activeSection(pathname);
 
   async function logout() {
