@@ -39,3 +39,13 @@ export async function sbUpdate(table: string, query: string, body: unknown) {
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
+
+export async function sbDelete(table: string, query: string) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+    method: "DELETE",
+    headers: headers({ Prefer: "return=representation" }),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
