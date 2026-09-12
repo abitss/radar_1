@@ -3,29 +3,33 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
-import { Bell, Building2, LogOut, Radar, Search, Settings, Signal, Sparkles, Target, Home } from "lucide-react";
+import { Bell, Building2, Compass, FileText, LogOut, Radar, Search, Settings, Signal, Sparkles, Target, Home } from "lucide-react";
 import { RadarLogo } from "@/components/radar-logo";
 import { RadarAutoSetup } from "@/components/radar-auto-setup";
 
-type MainKey = "today" | "radar" | "competitors" | "signals" | "decisions" | "settings";
+type MainKey = "dashboard" | "discover" | "radar" | "competitors" | "signals" | "decisions" | "briefings" | "settings";
 type NavItem = { label: string; href: string; icon: LucideIcon; key: MainKey; hint: string };
 
 const primaryNav: NavItem[] = [
-  { label: "Dashboard", href: "/", icon: Home, key: "today", hint: "What changed and what deserves founder attention." },
+  { label: "Dashboard", href: "/", icon: Home, key: "dashboard", hint: "What changed and what deserves founder attention." },
+  { label: "Discover", href: "/discover", icon: Compass, key: "discover", hint: "Unknown competitors and emerging players RADAR found." },
   { label: "RADAR", href: "/market", icon: Radar, key: "radar", hint: "Your living competitive map." },
-  { label: "Competitors", href: "/companies", icon: Building2, key: "competitors", hint: "Every direct, adjacent, micro and emerging competitor." },
+  { label: "Competitors", href: "/companies", icon: Building2, key: "competitors", hint: "Every direct, adjacent, substitute and emerging competitor." },
   { label: "Signals", href: "/signals", icon: Signal, key: "signals", hint: "Evidence-backed changes detected across the market." },
   { label: "Decisions", href: "/decisions", icon: Target, key: "decisions", hint: "What the evidence means and what to do next." },
+  { label: "Briefings", href: "/briefings", icon: FileText, key: "briefings", hint: "Daily, weekly and monthly founder intelligence summaries." },
 ];
 
-const settingsNav: NavItem = { label: "Settings", href: "/settings", icon: Settings, key: "settings", hint: "Company Brain, monitoring and workspace controls." };
+const settingsNav: NavItem = { label: "Settings", href: "/settings", icon: Settings, key: "settings", hint: "Company Brain, monitoring, sources and workspace controls." };
 
 function activeSection(pathname: string): MainKey | null {
-  if (pathname === "/") return "today";
-  if (["/market", "/discover", "/moves", "/market-map", "/watch-graph", "/monitor", "/intelligence"].some(p => pathname === p || pathname.startsWith(`${p}/`))) return "radar";
+  if (pathname === "/") return "dashboard";
+  if (pathname === "/discover" || pathname.startsWith("/discover/")) return "discover";
+  if (["/market", "/moves", "/market-map", "/watch-graph", "/monitor", "/intelligence"].some(p => pathname === p || pathname.startsWith(`${p}/`))) return "radar";
   if (pathname === "/companies" || pathname.startsWith("/companies/")) return "competitors";
   if (pathname === "/signals" || pathname.startsWith("/signals/")) return "signals";
   if (["/decisions", "/actions", "/outcomes"].some(p => pathname === p || pathname.startsWith(`${p}/`))) return "decisions";
+  if (pathname === "/briefings" || pathname.startsWith("/briefings/")) return "briefings";
   if (["/settings", "/brain", "/sources", "/system-health"].some(p => pathname === p || pathname.startsWith(`${p}/`))) return "settings";
   return null;
 }
