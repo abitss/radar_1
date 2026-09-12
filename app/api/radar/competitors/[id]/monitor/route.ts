@@ -21,20 +21,19 @@ export async function POST(req:Request,context:{params:Promise<{id:string}>}){
     const origin=new URL(req.url).origin;
     const secret=process.env.RADAR_API_SECRET||"";
     const target=normalizeUrl(competitor.website);
-    const threat=Number(competitor.threat_score||0);
-    const schedule=threat>=80?"every 6 hours":threat>=60?"every 12 hours":"daily";
-    const goal=`Watch ${competitor.name} for meaningful public changes in product, features, pricing, packaging, positioning, customers, partnerships, hiring, technology, geography, launches and go-to-market. Ignore cosmetic or boilerplate changes. Explain only changes that could matter competitively to ${workspace.name}.`;
+    const relatedProduct=String(competitor.related_product||competitor.name);
+    const goal=`High-frequency competitive surveillance for ${competitor.name}, especially ${relatedProduct}. Detect meaningful public changes in product capabilities, pricing, packaging, positioning, target customers, customer wins, partnerships, hiring signals, technology, geography, launches, go-to-market and product roadmap clues. Ignore cosmetic edits, duplicated text, unrelated business lines and generic corporate news. Explain only changes that could materially alter competitive pressure on ${workspace.name}.`;
 
     const created=await createMonitor({
-      name:`RADAR · ${competitor.name} · competitor watch`,
-      schedule:{text:schedule,timezone:"UTC"},
+      name:`RADAR · ${competitor.name} · high-frequency product watch`,
+      schedule:{text:"every hour",timezone:"UTC"},
       targets:[{type:"scrape",urls:[target]}],
       goal,
       judgeEnabled:true,
       webhook:{url:`${origin}/api/radar/firecrawl-webhook`,events:["monitor.page","monitor.check.completed"],headers:secret?{"x-radar-webhook-secret":secret}:undefined},
     });
     const providerId=created?.id||created?.data?.id||created?.monitor?.id||null;
-    const inserted=await sbInsert("radar_monitors",{workspace_id:workspace.id,competitor_id:competitor.id,provider:"firecrawl",provider_monitor_id:providerId,monitor_type:"entity_surveillance",name:`Competitive watch: ${competitor.name}`,schedule_text:schedule,goal,status:"active"});
+    const inserted=await sbInsert("radar_monitors",{workspace_id:workspace.id,competitor_id:competitor.id,provider:"firecrawl",provider_monitor_id:providerId,monitor_type:"entity_surveillance",name:`High-frequency watch: ${competitor.name}`,schedule_text:"every hour",goal,status:"active"});
     await sbUpdate("radar_competitors",`id=eq.${competitor.id}`,{monitoring_preference:"monitor",updated_at:new Date().toISOString()});
     return NextResponse.json({ok:true,monitor:inserted[0]||null});
   }catch(error){
