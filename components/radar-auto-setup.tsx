@@ -30,32 +30,48 @@ export function RadarAutoSetup({disabled=false}:{disabled?:boolean}){
 
         const params=new URLSearchParams(window.location.search);
         const explicit=params.get("initialize")==="1";
-        const needsInitial=workspace.initial_scan_status!=="completed";
-        if(!explicit&&!needsInitial)return;
+        const activeJob=Array.isArray(workspace.jobs)?workspace.jobs.find((j:any)=>j.job_type==="initial_intelligence"&&["queued","running"].includes(j.status)):null;
+        const needsInitial=workspace.initial_scan_status!=="completed"||Boolean(activeJob);
 
-        if(alive){
-          setStatus("working");
-          setMessage("RADAR is creating your complete competitive-intelligence universe automatically: Company Brain → web discovery → real companies/products → similarity & threat → deep evidence → monitoring → founder briefing.");
+        if(needsInitial){
+          if(alive){
+            setStatus("working");
+            const step=activeJob?.current_step&&activeJob.current_step!=="queued"?` Current step: ${activeJob.current_step}.`:"";
+            setMessage(`RADAR is creating this workspace's complete intelligence universe automatically.${step}`);
+          }
+          const init=await json("/api/radar/initialize",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({resume:true})});
+          if(!init.res.ok)throw new Error(init.data?.error||"Automatic intelligence initialization failed");
+          if(explicit)window.history.replaceState({},"",window.location.pathname||"/");
+          if(alive){
+            const out=init.data?.output||{};
+            setStatus("done");
+            setMessage(`Workspace intelligence ready: ${out.competitors||0} competitors, ${out.evidence||0} evidence items, ${out.signals||0} signals and ${out.recommendations||0} recommendations. Continuous discovery remains active.`);
+            await sleep(6500);
+            if(alive)setStatus("idle");
+          }
+          return;
         }
 
-        const init=await json("/api/radar/initialize",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
-        if(!init.res.ok)throw new Error(init.data?.error||"Automatic intelligence initialization failed");
-
-        if(explicit){
-          window.history.replaceState({},"",window.location.pathname||"/");
+        const overview=await json("/api/radar/overview");
+        if(!overview.res.ok)return;
+        if(!overview.data?.monitor){
+          if(alive){setStatus("working");setMessage("Restoring continuous market surveillance for this workspace...")}
+          const monitor=await json("/api/radar/continuous",{method:"POST"});
+          if(!monitor.res.ok)throw new Error(monitor.data?.error||"Continuous monitoring could not start");
+          if(alive){setStatus("done");setMessage("Continuous market surveillance restored.");await sleep(4000);if(alive)setStatus("idle")}
+          return;
         }
 
-        if(alive){
-          const out=init.data?.output||{};
-          setStatus("done");
-          setMessage(`RADAR initialization complete: ${out.competitors||0} competitors, ${out.evidence||0} evidence items, ${out.signals||0} signals and ${out.recommendations||0} founder recommendations. Continuous discovery remains active.`);
-          await sleep(7000);
-          if(alive)setStatus("idle");
+        if(Number(overview.data?.metrics?.competitors||0)===0){
+          if(alive){setStatus("working");setMessage("No verified competitors yet. RADAR is running a fresh discovery sweep for this workspace...")}
+          const discover=await json("/api/radar/discover",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({force:true})});
+          if(!discover.res.ok&&!discover.data?.cooldown)throw new Error(discover.data?.error||"Market discovery failed");
+          if(alive){setStatus("done");setMessage("Fresh discovery completed. RADAR will continue expanding this workspace automatically.");await sleep(4500);if(alive)setStatus("idle")}
         }
       }catch(error){
         if(alive){
           setStatus("error");
-          setMessage(error instanceof Error?`${error.message}. RADAR saved the failure state and will retry on your next workspace load.`:"Initialization failed. RADAR will retry automatically.");
+          setMessage(error instanceof Error?`${error.message}. RADAR saved the state and will retry safely for this workspace.`:"Initialization failed. RADAR will retry safely.");
         }
       }
     }
