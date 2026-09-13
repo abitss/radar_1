@@ -41,6 +41,7 @@ export function RadarAutoSetup({disabled=false}:{disabled?:boolean}){
           }
           const init=await json("/api/radar/initialize",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({resume:true})});
           if(!init.res.ok)throw new Error(init.data?.error||"Automatic intelligence initialization failed");
+          await json("/api/radar/maintenance",{method:"POST"}).catch(()=>null);
           if(explicit)window.history.replaceState({},"",window.location.pathname||"/");
           if(alive){
             const out=init.data?.output||{};
@@ -59,7 +60,6 @@ export function RadarAutoSetup({disabled=false}:{disabled?:boolean}){
           const monitor=await json("/api/radar/continuous",{method:"POST"});
           if(!monitor.res.ok)throw new Error(monitor.data?.error||"Continuous monitoring could not start");
           if(alive){setStatus("done");setMessage("Continuous market surveillance restored.");await sleep(4000);if(alive)setStatus("idle")}
-          return;
         }
 
         if(Number(overview.data?.metrics?.competitors||0)===0){
@@ -68,6 +68,7 @@ export function RadarAutoSetup({disabled=false}:{disabled?:boolean}){
           if(!discover.res.ok&&!discover.data?.cooldown)throw new Error(discover.data?.error||"Market discovery failed");
           if(alive){setStatus("done");setMessage("Fresh discovery completed. RADAR will continue expanding this workspace automatically.");await sleep(4500);if(alive)setStatus("idle")}
         }
+        await json("/api/radar/maintenance",{method:"POST"}).catch(()=>null);
       }catch(error){
         if(alive){
           setStatus("error");
@@ -78,6 +79,15 @@ export function RadarAutoSetup({disabled=false}:{disabled?:boolean}){
 
     run();
     return()=>{alive=false};
+  },[disabled]);
+
+  useEffect(()=>{
+    if(disabled)return;
+    const tick=()=>fetch("/api/radar/maintenance",{method:"POST",cache:"no-store"}).catch(()=>{});
+    const timer=window.setInterval(tick,10*60*1000);
+    const onFocus=()=>tick();
+    window.addEventListener("focus",onFocus);
+    return()=>{window.clearInterval(timer);window.removeEventListener("focus",onFocus)};
   },[disabled]);
 
   if(status==="idle")return null;
