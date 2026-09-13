@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { searchWebFast } from "@/lib/firecrawl";
 import { analyzeDiscoveryResults, radarAIConfigured } from "@/lib/radar-ai";
+import { runWorkspaceSourceMonitor, scheduleWorkspaceRecurringTasks } from "@/lib/radar-source-monitor";
 
 function domainOf(raw:string){try{return new URL(raw).hostname.replace(/^www\./,"").toLowerCase()}catch{return""}}
 function originOf(raw:string){try{return new URL(raw).origin}catch{return raw}}
@@ -22,7 +23,11 @@ export async function POST(req:Request){
     const monitor=(await sbSelect(`radar_monitors?provider_monitor_id=eq.${encodeURIComponent(String(monitorId))}&select=*&limit=1`))[0];
     if(!monitor)return NextResponse.json({ok:true,ignored:"monitor_not_found"});
     await sbUpdate("radar_monitors",`id=eq.${monitor.id}`,{last_event_at:new Date().toISOString(),updated_at:new Date().toISOString(),last_error:null});
-    if(type==="monitor.check.completed")return NextResponse.json({ok:true,type,processed:0});
+    if(type==="monitor.check.completed"){
+      await scheduleWorkspaceRecurringTasks(monitor.workspace_id).catch(()=>{});
+      const semantic=await runWorkspaceSourceMonitor(monitor.workspace_id,8).catch((error:any)=>({error:error?.message||"semantic monitoring failed"}));
+      return NextResponse.json({ok:true,type,processed:0,semantic});
+    }
 
     const workspace=(await sbSelect(`radar_workspaces?id=eq.${monitor.workspace_id}&select=*`))[0]; if(!workspace)return NextResponse.json({ok:true,ignored:"workspace_not_found"});
     const ownDomain=domainOf(workspace.website||"");
