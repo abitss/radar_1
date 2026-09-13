@@ -66,6 +66,23 @@ export async function searchWeb(query: string, limit = 6): Promise<FirecrawlSear
   return searchRows(payload);
 }
 
+export async function scrapeUrl(url:string) {
+  const payload = await firecrawlRequest("/scrape", {
+    url,
+    formats: ["markdown"],
+    onlyMainContent: true,
+    maxAge: 0,
+    timeout: 45000,
+  }, 52000);
+  const data = payload?.data || payload || {};
+  return {
+    url: String(data?.metadata?.sourceURL || data?.metadata?.url || url),
+    title: String(data?.metadata?.title || data?.title || ""),
+    markdown: String(data?.markdown || "").slice(0, 90000),
+    metadata: data?.metadata || {},
+  };
+}
+
 export async function scrapeCompanyProfile(url: string) {
   const schema = {
     type: "object",
