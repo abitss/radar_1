@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { searchWebFast } from "@/lib/firecrawl";
 import { analyzeDiscoveryResults, radarAIConfigured } from "@/lib/radar-ai";
-import { runWorkspaceSourceMonitor, scheduleWorkspaceRecurringTasks } from "@/lib/radar-source-monitor";
+import { scheduleWorkspaceRecurringTasks } from "@/lib/radar-source-monitor";
 
 function domainOf(raw:string){try{return new URL(raw).hostname.replace(/^www\./,"").toLowerCase()}catch{return""}}
 function originOf(raw:string){try{return new URL(raw).origin}catch{return raw}}
@@ -13,6 +13,13 @@ function sourceLike(domain:string){return sourceDomains.some(x=>domain===x||doma
 function severityFor(impact:number){return impact>=90?"critical":impact>=75?"high":impact>=55?"watch":"info"}
 async function resolveOfficial(name:string,relatedProduct:string,supplied:string,ownDomain:string){const d=domainOf(supplied||"");if(d&&!sourceLike(d)&&d!==ownDomain)return originOf(supplied);try{const rows=await searchWebFast(`"${name}" ${relatedProduct||"product"} official`,4);const tokens=name.toLowerCase().split(/[^a-z0-9]+/).filter(x=>x.length>2);const hit=rows.find((r:any)=>{const rd=domainOf(r.url);if(!rd||sourceLike(rd)||rd===ownDomain)return false;const hay=`${r.title||""} ${r.description||""} ${rd}`.toLowerCase();return tokens.some(t=>hay.includes(t))});return hit?originOf(hit.url):""}catch{return""}}
 async function liveEvent(data:any){try{await sbInsert("radar_intelligence_events",data)}catch{}}
+async function runMaintenance(req:Request,workspaceId:string,secret:string){
+  try{
+    const res=await fetch(new URL("/api/radar/maintenance",req.url),{method:"POST",headers:{"Content-Type":"application/json","x-radar-api-key":secret,"x-radar-system-workspace":workspaceId},body:JSON.stringify({providerHeartbeat:true}),cache:"no-store",signal:AbortSignal.timeout(240000)});
+    const data=await res.json().catch(()=>({}));
+    return{ok:res.ok,status:res.status,data};
+  }catch(error){return{ok:false,status:0,data:{error:error instanceof Error?error.message:"maintenance failed"}}}
+}
 
 export async function POST(req:Request){
   try{
@@ -25,8 +32,8 @@ export async function POST(req:Request){
     await sbUpdate("radar_monitors",`id=eq.${monitor.id}`,{last_event_at:new Date().toISOString(),updated_at:new Date().toISOString(),last_error:null});
     if(type==="monitor.check.completed"){
       await scheduleWorkspaceRecurringTasks(monitor.workspace_id).catch(()=>{});
-      const semantic=await runWorkspaceSourceMonitor(monitor.workspace_id,8).catch((error:any)=>({error:error?.message||"semantic monitoring failed"}));
-      return NextResponse.json({ok:true,type,processed:0,semantic});
+      const maintenance=await runMaintenance(req,monitor.workspace_id,expected);
+      return NextResponse.json({ok:true,type,processed:0,maintenance});
     }
 
     const workspace=(await sbSelect(`radar_workspaces?id=eq.${monitor.workspace_id}&select=*`))[0]; if(!workspace)return NextResponse.json({ok:true,ignored:"workspace_not_found"});
@@ -59,7 +66,7 @@ export async function POST(req:Request){
           const existing=(await sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&website=eq.${encodeURIComponent(originOf(official))}&select=*&limit=1`))[0];
           if(existing){competitor=existing;continue}
           const similarity=Math.round(productOverlap*.82); const threat=Math.min(100,Math.round(similarity*.72+productOverlap*.28));
-          const rows=await sbInsert("radar_competitors",{workspace_id:workspace.id,name,website:originOf(official),description:entity.related_product||entity.relationship_reason||reason,category:categoryFor(similarity),similarity_score:similarity,product_overlap_score:productOverlap,relation_confidence:relationConfidence,related_product:entity.related_product||null,relationship_reason:entity.relationship_reason||reason,discovery_source_url:url,threat_score:threat,momentum_score:45,movement:"closer",monitoring_preference:"neutral",why_it_matters:`${name} makes ${entity.related_product||"a related product"}. ${entity.relationship_reason||reason} Product overlap ${productOverlap}%; discovery confidence ${relationConfidence}%.`});
+          const rows=await sbInsert("radar_competitors",{workspace_id:workspace.id,name,website:originOf(official),description:entity.related_product||entity.relationship_reason||reason,category:categoryFor(similarity),similarity_score:similarity,product_overlap_score:productOverlap,relation_confidence:relationConfidence,related_product:entity.related_product||null,relationship_reason:entity.relationship_reason||reason,discovery_source_url:url,threat_score:threat,momentum_score:45,movement:"closer",monitoring_preference:"auto",why_it_matters:`${name} makes ${entity.related_product||"a related product"}. ${entity.relationship_reason||reason} Product overlap ${productOverlap}%; discovery confidence ${relationConfidence}%.`});
           competitor=rows[0]||null;promoted++;
           if(competitor)await liveEvent({workspace_id:workspace.id,competitor_id:competitor.id,event_type:"new_competitor",severity:severityFor(threat),title:`New competitor detected: ${name}`,summary:`${entity.related_product||"Related product"} · ${productOverlap}% product overlap · ${threat}% provisional threat. ${entity.relationship_reason||reason}`,source_url:url,confidence:relationConfidence,impact_score:threat,dedupe_key:`new_competitor:${competitor.id}`});
         }
