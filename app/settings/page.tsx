@@ -21,15 +21,16 @@ export default function SettingsPage(){
   useEffect(()=>{load()},[]);
 
   async function activate(){
-    setBusy(true);setMessage(monitor?"Refreshing competitive universe...":"Activating continuous RADAR...");
+    setBusy(true);setMessage(monitor?"Running full competitive-intelligence refresh...":"Activating RADAR and building the competitive universe...");
     try{
-      const discover=await fetch("/api/radar/discover",{method:"POST"});
-      const discoverData=await discover.json().catch(()=>({}));
-      if(!discover.ok && !discoverData?.cooldown) throw new Error(discoverData?.error||"Market discovery failed");
+      const refresh=await fetch("/api/radar/refresh",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});
+      const refreshData=await refresh.json().catch(()=>({}));
+      if(!refresh.ok)throw new Error(refreshData?.error||"Market intelligence refresh failed");
       const continuous=await fetch("/api/radar/continuous",{method:"POST"});
       const continuousData=await continuous.json().catch(()=>({}));
       if(!continuous.ok) throw new Error(continuousData?.error||"Continuous monitoring could not start");
-      setMessage(monitor?"Competitive universe refreshed. Monitoring remains active.":"Continuous RADAR is active.");
+      const discovery=refreshData.discovery||{};
+      setMessage(`RADAR refreshed: ${discovery.promoted||0} competitors discovered · ${refreshData.deep_scans||0} verified · ${refreshData.market_events||0} material market events · ${refreshData.signals_created||0} signals · ${refreshData.recommendations_created||0} founder actions.`);
       await load();
     }catch(error){setMessage(error instanceof Error?error.message:"Action failed")}finally{setBusy(false)}
   }
@@ -40,7 +41,7 @@ export default function SettingsPage(){
       <article className="panel founder-panel">
         <div className="founder-panel-head"><div><span>SURVEILLANCE STATUS</span><h2>{monitor===undefined?"Checking…":monitor?"Continuous RADAR is active":"Continuous RADAR is not active"}</h2></div><Activity size={21}/></div>
         <p>{monitor?`Public-web discovery runs ${monitor.schedule_text||"automatically"}. ${monitor.last_event_at?`Last provider event: ${new Date(monitor.last_event_at).toLocaleString()}.`:"Waiting for the first provider event."}`:configured?"Activate continuous discovery for this workspace.":"The web-monitoring provider is not configured."}</p>
-        <button onClick={activate} disabled={busy||!configured} className="secondary-button">{busy?<><LoaderCircle size={14}/>Working...</>:monitor?"Refresh competitive universe":"Activate RADAR"}</button>
+        <button onClick={activate} disabled={busy||!configured} className="secondary-button">{busy?<><LoaderCircle size={14}/>Working...</>:monitor?"Run full RADAR refresh":"Activate RADAR"}</button>
         {message?<div style={{marginTop:9,fontSize:11,color:"#687076"}}>{message}</div>:null}
       </article>
       <article className="panel founder-panel">
@@ -59,6 +60,6 @@ export default function SettingsPage(){
     </section>
 
     <StartupProfileForm/>
-    <section className="panel founder-panel" style={{marginTop:13}}><div className="founder-panel-head"><div><span>HOW RADAR WORKS</span><h2>Discover → Understand → Monitor → Interpret → Act</h2></div><Radar size={21}/></div><p>Editing the Company Brain changes future discovery and scoring. Refresh the competitive universe after a major positioning, customer, pricing or product change.</p></section>
+    <section className="panel founder-panel" style={{marginTop:13}}><div className="founder-panel-head"><div><span>HOW RADAR WORKS</span><h2>Discover → Understand → Monitor → Interpret → Act</h2></div><Radar size={21}/></div><p>Editing the Company Brain changes future discovery and scoring. A full refresh now re-discovers the market, verifies competitors, researches fresh market events, stores evidence and creates founder actions.</p></section>
   </div>;
 }
