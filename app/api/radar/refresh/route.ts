@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { searchWebFast } from "@/lib/firecrawl";
 import { analyzeMarketEvents } from "@/lib/radar-ultimate-ai";
+import { detectMovesForWorkspace } from "@/lib/radar-moves";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
 function clean(text:any){return String(text||"").toLowerCase().replace(/[^a-z0-9\s]/g," ").replace(/\s+/g," ").trim()}
@@ -14,7 +15,7 @@ export async function POST(req:Request){
     const {workspace}=await workspaceForRequest(req,true);
     if(!workspace.website)return NextResponse.json({error:"Complete startup setup first."},{status:400});
     const run=(await sbInsert("radar_scan_runs",{workspace_id:workspace.id,run_type:"workspace_refresh",status:"running"}))[0];
-    const result:any={discovery:null,deep_scans:0,market_events:0,signals_created:0,recommendations_created:0,evidence_created:0};
+    const result:any={discovery:null,deep_scans:0,market_events:0,signals_created:0,recommendations_created:0,evidence_created:0,moves_correlated:0};
     try{
       const discover=await internal(req,"/api/radar/discover",{force:true});
       result.discovery={ok:discover.res.ok||Boolean(discover.data?.cooldown),inspected:discover.data?.inspected||0,promoted:discover.data?.promoted||0,entities:discover.data?.entities_extracted||0,error:discover.res.ok?null:discover.data?.error||null};
@@ -38,10 +39,10 @@ export async function POST(req:Request){
           const duplicate=recentSignals.find((s:any)=>String(s.competitor_id||"")===String(competitor.id)&&Math.max(overlap(s.title,event.title),overlap(s.summary,event.summary))>=.62);
           if(duplicate)continue;
           const impact=Math.max(0,Math.min(100,Math.round(Number(event.importance||0)*.72+Number(event.confidence||0)*.28)));
-          const signalRows=await sbInsert("radar_signals",{workspace_id:workspace.id,competitor_id:competitor.id,signal_type:event.category||"market_event",title:event.title,summary:event.summary||event.explanation||"",impact_score:impact,confidence:event.confidence||70,status:"new"});
+          const signalRows=await sbInsert("radar_signals",{workspace_id:workspace.id,competitor_id:competitor.id,signal_type:event.category||"market_event",title:event.title,summary:event.summary||event.explanation||"",impact_score:impact,confidence:event.confidence||70,status:"new",relevance:event.importance||impact,urgency:event.importance||50,novelty:70,credibility:event.confidence||70,impact:event.impact||null,explanation:event.explanation||null,suggested_action:event.suggested_action||null,fact_or_inference:event.fact_or_inference||"fact"});
           const signal=signalRows[0];result.signals_created++;result.market_events++;
           for(const url of (event.evidence_urls||[]).slice(0,6)){
-            await sbInsert("radar_evidence",{workspace_id:workspace.id,competitor_id:competitor.id,source_url:url,source_type:"live_market_research",title:event.title,fact:event.fact_or_inference==="fact"?event.summary:`Evidence supporting inference: ${event.summary}`,summary:event.explanation||event.summary,confidence:event.confidence||70});result.evidence_created++;
+            await sbInsert("radar_evidence",{workspace_id:workspace.id,competitor_id:competitor.id,source_url:url,source_type:"live_market_research",title:event.title,fact:event.fact_or_inference==="fact"?event.summary:`Evidence supporting inference: ${event.summary}`,summary:event.explanation||event.summary,confidence:event.confidence||70,claim_type:event.fact_or_inference||"fact"});result.evidence_created++;
           }
           if(impact>=55&&event.suggested_action){await sbInsert("radar_recommendations",{workspace_id:workspace.id,competitor_id:competitor.id,priority:impact>=82?"high":impact>=65?"medium":"low",title:`Review: ${event.title}`.slice(0,240),rationale:event.impact||event.explanation||event.summary,action:event.suggested_action,status:"open"});result.recommendations_created++}
           try{await sbInsert("radar_intelligence_events",{workspace_id:workspace.id,competitor_id:competitor.id,event_type:event.category||"market_event",severity:impact>=90?"critical":impact>=75?"high":impact>=55?"watch":"info",title:event.title,summary:event.summary,source_url:event.evidence_urls?.[0]||null,confidence:event.confidence||70,impact_score:impact,dedupe_key:`research:${competitor.id}:${clean(event.title).slice(0,120)}`})}catch{}
@@ -49,6 +50,7 @@ export async function POST(req:Request){
         }
       }
 
+      try{const moves=await detectMovesForWorkspace(workspace.id);result.moves_correlated=moves.moves||0}catch{}
       await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:webEvidence.length,findings:result.market_events,finished_at:new Date().toISOString()});
       return NextResponse.json({ok:true,...result});
     }catch(error){await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"failed",error:error instanceof Error?error.message:"Refresh failed",finished_at:new Date().toISOString()}).catch(()=>{});throw error}
