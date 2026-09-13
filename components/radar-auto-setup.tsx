@@ -34,33 +34,21 @@ export function RadarAutoSetup({disabled=false}:{disabled?:boolean}){
         const needsInitial=workspace.initial_scan_status!=="completed"||Boolean(activeJob);
 
         if(needsInitial){
-          if(alive){
-            setStatus("working");
-            const step=activeJob?.current_step&&activeJob.current_step!=="queued"?` Current step: ${activeJob.current_step}.`:"";
-            setMessage(`RADAR is creating this workspace's complete intelligence universe automatically.${step}`);
-          }
+          if(alive){setStatus("working");const step=activeJob?.current_step&&activeJob.current_step!=="queued"?` Current step: ${activeJob.current_step}.`:"";setMessage(`RADAR is creating this workspace's complete intelligence universe automatically.${step}`);}
           const init=await json("/api/radar/initialize",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({resume:true})});
           if(!init.res.ok)throw new Error(init.data?.error||"Automatic intelligence initialization failed");
+          await json("/api/radar/continuous",{method:"POST"}).catch(()=>null);
           await json("/api/radar/maintenance",{method:"POST"}).catch(()=>null);
           if(explicit)window.history.replaceState({},"",window.location.pathname||"/");
-          if(alive){
-            const out=init.data?.output||{};
-            setStatus("done");
-            setMessage(`Workspace intelligence ready: ${out.competitors||0} competitors, ${out.evidence||0} evidence items, ${out.signals||0} signals and ${out.recommendations||0} recommendations. Continuous discovery remains active.`);
-            await sleep(6500);
-            if(alive)setStatus("idle");
-          }
+          if(alive){const out=init.data?.output||{};setStatus("done");setMessage(`Workspace intelligence ready: ${out.competitors||0} competitors, ${out.evidence||0} evidence items, ${out.signals||0} signals and ${out.recommendations||0} recommendations. Continuous discovery remains active.`);await sleep(6500);if(alive)setStatus("idle");}
           return;
         }
 
         const overview=await json("/api/radar/overview");
         if(!overview.res.ok)return;
-        if(!overview.data?.monitor){
-          if(alive){setStatus("working");setMessage("Restoring continuous market surveillance for this workspace...")}
-          const monitor=await json("/api/radar/continuous",{method:"POST"});
-          if(!monitor.res.ok)throw new Error(monitor.data?.error||"Continuous monitoring could not start");
-          if(alive){setStatus("done");setMessage("Continuous market surveillance restored.");await sleep(4000);if(alive)setStatus("idle")}
-        }
+        const monitor=await json("/api/radar/continuous",{method:"POST"});
+        if(!monitor.res.ok)throw new Error(monitor.data?.error||"Continuous monitoring could not start");
+        if(!overview.data?.monitor&&alive){setStatus("done");setMessage("Continuous market surveillance restored.");await sleep(2500);if(alive)setStatus("idle")}
 
         if(Number(overview.data?.metrics?.competitors||0)===0){
           if(alive){setStatus("working");setMessage("No verified competitors yet. RADAR is running a fresh discovery sweep for this workspace...")}
@@ -70,10 +58,7 @@ export function RadarAutoSetup({disabled=false}:{disabled?:boolean}){
         }
         await json("/api/radar/maintenance",{method:"POST"}).catch(()=>null);
       }catch(error){
-        if(alive){
-          setStatus("error");
-          setMessage(error instanceof Error?`${error.message}. RADAR saved the state and will retry safely for this workspace.`:"Initialization failed. RADAR will retry safely.");
-        }
+        if(alive){setStatus("error");setMessage(error instanceof Error?`${error.message}. RADAR saved the state and will retry safely for this workspace.`:"Initialization failed. RADAR will retry safely.");}
       }
     }
 
@@ -91,7 +76,5 @@ export function RadarAutoSetup({disabled=false}:{disabled?:boolean}){
   },[disabled]);
 
   if(status==="idle")return null;
-  return <div style={{margin:"12px 22px 0",padding:"10px 12px",border:"1px solid #d9dde0",borderRadius:10,background:"#f8f9f9",display:"flex",alignItems:"center",gap:9,fontSize:12,color:"#545b60"}}>
-    {status==="working"?<LoaderCircle size={15} className="spin"/>:<CheckCircle2 size={15}/>}<span>{message}</span>
-  </div>;
+  return <div style={{margin:"12px 22px 0",padding:"10px 12px",border:"1px solid #d9dde0",borderRadius:10,background:"#f8f9f9",display:"flex",alignItems:"center",gap:9,fontSize:12,color:"#545b60"}}>{status==="working"?<LoaderCircle size={15} className="spin"/>:<CheckCircle2 size={15}/>}<span>{message}</span></div>;
 }
