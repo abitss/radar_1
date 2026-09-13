@@ -34,10 +34,7 @@ function buildQueries(workspace: any) {
   for (const t of tech.slice(0,3)) q.add(`${t} ${product[0] || caps[0] || "startup"} company`);
   if(industry.length) q.add(`${industry.slice(0,2).join(" ")} startup funding launch`);
   if (workspace.geography && product.length) q.add(`${product.slice(0,2).join(" ")} startup ${workspace.geography}`);
-  if (workspace.name) {
-    q.add(`${workspace.name} alternatives competitors`);
-    q.add(`companies similar to ${workspace.name}`);
-  }
+  if (workspace.name) { q.add(`${workspace.name} alternatives competitors`); q.add(`companies similar to ${workspace.name}`); }
   return [...q].filter(Boolean).slice(0, 20);
 }
 
@@ -58,25 +55,22 @@ export async function POST(req: Request) {
     const { workspace, user } = await workspaceForRequest(req, true);
     const current = await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&monitor_type=eq.web_discovery&status=eq.active&select=*&limit=1`);
     if (current[0]) return NextResponse.json({ ok:true, monitor:current[0], alreadyActive:true });
-
     const queries = buildQueries(workspace);
     if (!queries.length) return NextResponse.json({ error: "Add more Company Brain details before activating continuous discovery." }, { status: 400 });
-
     const origin = new URL(req.url).origin;
     const webhookUrl = `${origin}/api/radar/firecrawl-webhook`;
     const secret = process.env.RADAR_API_SECRET || "";
     const goal = `Continuously detect decision-relevant competitive movement around ${workspace.name}. Find newly appearing companies and products, product launches, feature changes, pricing changes, positioning shifts, customer wins, partnerships, hiring patterns, funding, geographic expansion, technology changes and go-to-market moves. Extract the real company and exact related product. Prioritize product overlap, customer overlap and strategic convergence. Ignore generic news, duplicate articles, cosmetic edits and unrelated companies.`;
-
-    const created = await createMonitor({
+    const monitorPayload:any={
       name: `RADAR · ${workspace.name} · high-frequency competitive watch`,
       schedule: { text: "every hour", timezone: "UTC" },
       targets: [{ type: "search", queries, searchWindow: "24h", maxResults: 30 }],
       goal,
       judgeEnabled: true,
       webhook: { url: webhookUrl, events: ["monitor.page", "monitor.check.completed"], headers: secret ? { "x-radar-webhook-secret": secret } : undefined },
-      notification: { email: { enabled: true, recipients: [user.email], includeDiffs: true } },
-    });
-
+    };
+    if(user?.email) monitorPayload.notification={email:{enabled:true,recipients:[user.email],includeDiffs:true}};
+    const created = await createMonitor(monitorPayload);
     const providerId = created?.id || created?.data?.id || created?.monitor?.id;
     const rows = await sbInsert("radar_monitors", { workspace_id: workspace.id, provider:"firecrawl", provider_monitor_id:providerId || null, monitor_type:"web_discovery", name:`High-frequency competitive watch for ${workspace.name}`, schedule_text:"every hour", goal, status:"active" });
     return NextResponse.json({ ok:true, queries, monitor:rows[0] });
