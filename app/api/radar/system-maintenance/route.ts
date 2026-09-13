@@ -15,7 +15,7 @@ async function systemCall(req:Request,workspaceId:string,path:string,body?:any){
 export async function POST(req:Request){
   try{
     const supplied=req.headers.get("x-radar-cron-secret")||"";
-    const expected=process.env.RADAR_CRON_SECRET||"";
+    const expected=process.env.RADAR_CRON_SECRET||process.env.RADAR_API_SECRET||"";
     if(!expected||!safeEqual(supplied,expected))return NextResponse.json({error:"Unauthorized"},{status:401});
     if(!process.env.RADAR_API_SECRET)return NextResponse.json({error:"RADAR_API_SECRET is not configured"},{status:503});
 
@@ -38,14 +38,15 @@ export async function POST(req:Request){
     }
 
     const dueTasks=await sbSelect(`radar_recurring_tasks?next_run_at=lte.${encodeURIComponent(nowIso)}&select=workspace_id,task_key,next_run_at&order=next_run_at.asc&limit=30`);
-    const dueWorkspaceIds=[...new Set(dueTasks.map((x:any)=>String(x.workspace_id)))].slice(0,4);
+    const allDueWorkspaceIds=[...new Set(dueTasks.map((x:any)=>String(x.workspace_id)))];
+    const dueWorkspaceIds=allDueWorkspaceIds.slice(0,4);
     const maintenanceResults:any[]=[];
     for(const workspaceId of dueWorkspaceIds){
       const r=await systemCall(req,workspaceId,"/api/radar/maintenance",{system:true});
       maintenanceResults.push({workspace_id:workspaceId,ok:r.ok,status:r.status,tasks_processed:r.data?.tasks_processed||0,tasks_failed:r.data?.tasks_failed||0,error:r.ok?null:r.data?.error||"Maintenance failed"});
     }
 
-    return NextResponse.json({ok:true,at:nowIso,stale_jobs_recovered:stale.length,workspaces_registered:workspaces.length,initial_jobs:initialResults,maintenance:maintenanceResults,due_workspaces_remaining:Math.max(0,[...new Set(dueTasks.map((x:any)=>String(x.workspace_id)))].length-dueWorkspaceIds.length)});
+    return NextResponse.json({ok:true,at:nowIso,stale_jobs_recovered:stale.length,workspaces_registered:workspaces.length,initial_jobs:initialResults,maintenance:maintenanceResults,due_workspaces_remaining:Math.max(0,allDueWorkspaceIds.length-dueWorkspaceIds.length)});
   }catch(error){
     return NextResponse.json({error:error instanceof Error?error.message:"System maintenance failed"},{status:500});
   }
