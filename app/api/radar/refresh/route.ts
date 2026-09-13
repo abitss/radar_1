@@ -1,0 +1,56 @@
+import { NextResponse } from "next/server";
+import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
+import { searchWebFast } from "@/lib/firecrawl";
+import { analyzeMarketEvents } from "@/lib/radar-ultimate-ai";
+import { workspaceForRequest } from "@/lib/radar-workspace";
+
+function clean(text:any){return String(text||"").toLowerCase().replace(/[^a-z0-9\s]/g," ").replace(/\s+/g," ").trim()}
+function overlap(a:any,b:any){const A=new Set(clean(a).split(" ").filter(x=>x.length>3)),B=new Set(clean(b).split(" ").filter(x=>x.length>3));if(!A.size||!B.size)return 0;let both=0;for(const x of A)if(B.has(x))both++;return both/Math.max(1,Math.min(A.size,B.size))}
+function eventQuery(c:any){const product=String(c.related_product||c.description||c.name).slice(0,120);return [`"${c.name}" ${product} launch pricing features`, `"${c.name}" funding partnership hiring technology`, `site:${(()=>{try{return new URL(c.website).hostname}catch{return c.name}})()} ${product} pricing product news`];}
+async function internal(req:Request,path:string,body?:any){const url=new URL(path,req.url);const headers:any={"Content-Type":"application/json"};const cookie=req.headers.get("cookie");if(cookie)headers.cookie=cookie;const res=await fetch(url,{method:"POST",headers,body:body===undefined?undefined:JSON.stringify(body),cache:"no-store"});const data=await res.json().catch(()=>({}));return{res,data}}
+
+export async function POST(req:Request){
+  try{
+    const {workspace}=await workspaceForRequest(req,true);
+    if(!workspace.website)return NextResponse.json({error:"Complete startup setup first."},{status:400});
+    const run=(await sbInsert("radar_scan_runs",{workspace_id:workspace.id,run_type:"workspace_refresh",status:"running"}))[0];
+    const result:any={discovery:null,deep_scans:0,market_events:0,signals_created:0,recommendations_created:0,evidence_created:0};
+    try{
+      const discover=await internal(req,"/api/radar/discover",{force:true});
+      result.discovery={ok:discover.res.ok||Boolean(discover.data?.cooldown),inspected:discover.data?.inspected||0,promoted:discover.data?.promoted||0,entities:discover.data?.entities_extracted||0,error:discover.res.ok?null:discover.data?.error||null};
+
+      const competitors=await sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&select=*&order=threat_score.desc,product_overlap_score.desc,similarity_score.desc&limit=24`);
+      const scanTargets=competitors.filter((c:any)=>c.website).slice(0,10);
+      const scanResults=await Promise.allSettled(scanTargets.map((c:any)=>internal(req,"/api/radar/scan",{competitorId:c.id,quick:true})));
+      result.deep_scans=scanResults.filter((x:any)=>x.status==="fulfilled"&&(x.value.res.ok||x.value.data?.cooldown)).length;
+
+      const refreshedCompetitors=await sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&select=*&order=threat_score.desc,product_overlap_score.desc&limit=20`);
+      const recentSignals=await sbSelect(`radar_signals?workspace_id=eq.${workspace.id}&select=*&order=observed_at.desc&limit=80`);
+      const evidenceSearches=await Promise.allSettled(refreshedCompetitors.slice(0,12).flatMap((c:any)=>eventQuery(c).map(q=>searchWebFast(q,5))));
+      const map=new Map<string,any>();
+      for(const set of evidenceSearches){if(set.status!=="fulfilled")continue;for(const r of set.value){if(r?.url&&!map.has(r.url))map.set(r.url,r)}}
+      const webEvidence=[...map.values()].slice(0,100);
+      if(webEvidence.length&&refreshedCompetitors.length){
+        const analysis=await analyzeMarketEvents(workspace,refreshedCompetitors,webEvidence,recentSignals);
+        const byName=new Map(refreshedCompetitors.map((c:any)=>[String(c.name||"").toLowerCase(),c]));
+        for(const event of analysis.events||[]){
+          const competitor:any=byName.get(String(event.company_name||"").toLowerCase());if(!competitor)continue;
+          const duplicate=recentSignals.find((s:any)=>String(s.competitor_id||"")===String(competitor.id)&&Math.max(overlap(s.title,event.title),overlap(s.summary,event.summary))>=.62);
+          if(duplicate)continue;
+          const impact=Math.max(0,Math.min(100,Math.round(Number(event.importance||0)*.72+Number(event.confidence||0)*.28)));
+          const signalRows=await sbInsert("radar_signals",{workspace_id:workspace.id,competitor_id:competitor.id,signal_type:event.category||"market_event",title:event.title,summary:event.summary||event.explanation||"",impact_score:impact,confidence:event.confidence||70,status:"new"});
+          const signal=signalRows[0];result.signals_created++;result.market_events++;
+          for(const url of (event.evidence_urls||[]).slice(0,6)){
+            await sbInsert("radar_evidence",{workspace_id:workspace.id,competitor_id:competitor.id,source_url:url,source_type:"live_market_research",title:event.title,fact:event.fact_or_inference==="fact"?event.summary:`Evidence supporting inference: ${event.summary}`,summary:event.explanation||event.summary,confidence:event.confidence||70});result.evidence_created++;
+          }
+          if(impact>=55&&event.suggested_action){await sbInsert("radar_recommendations",{workspace_id:workspace.id,competitor_id:competitor.id,priority:impact>=82?"high":impact>=65?"medium":"low",title:`Review: ${event.title}`.slice(0,240),rationale:event.impact||event.explanation||event.summary,action:event.suggested_action,status:"open"});result.recommendations_created++}
+          try{await sbInsert("radar_intelligence_events",{workspace_id:workspace.id,competitor_id:competitor.id,event_type:event.category||"market_event",severity:impact>=90?"critical":impact>=75?"high":impact>=55?"watch":"info",title:event.title,summary:event.summary,source_url:event.evidence_urls?.[0]||null,confidence:event.confidence||70,impact_score:impact,dedupe_key:`research:${competitor.id}:${clean(event.title).slice(0,120)}`})}catch{}
+          if(signal?.id) recentSignals.unshift(signal);
+        }
+      }
+
+      await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:webEvidence.length,findings:result.market_events,finished_at:new Date().toISOString()});
+      return NextResponse.json({ok:true,...result});
+    }catch(error){await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"failed",error:error instanceof Error?error.message:"Refresh failed",finished_at:new Date().toISOString()}).catch(()=>{});throw error}
+  }catch(error){if(error instanceof Error&&error.message==="UNAUTHORIZED")return NextResponse.json({error:"Unauthorized"},{status:401});return NextResponse.json({error:error instanceof Error?error.message:"Workspace refresh failed"},{status:500})}
+}
