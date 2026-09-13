@@ -34,7 +34,7 @@ export async function PATCH(req:Request,context:{params:Promise<{id:string}>}){
     const body=await req.json();
     const patch:any={updated_at:new Date().toISOString()};
     if(body.category){const category=String(body.category);if(!categories.has(category))return NextResponse.json({error:"Invalid category"},{status:400});patch.category=category;}
-    if(body.monitoring_preference){const pref=String(body.monitoring_preference);if(!["monitor","ignore","neutral"].includes(pref))return NextResponse.json({error:"Invalid monitoring preference"},{status:400});patch.monitoring_preference=pref;}
+    if(body.monitoring_preference){const pref=String(body.monitoring_preference);if(!["auto","monitor","ignore"].includes(pref))return NextResponse.json({error:"Invalid monitoring preference"},{status:400});patch.monitoring_preference=pref;}
     if(body.user_feedback)patch.user_feedback=String(body.user_feedback).slice(0,80);
     const updated=await sbUpdate("radar_competitors",`id=eq.${id}&workspace_id=eq.${workspace.id}`,patch);
     return NextResponse.json(updated[0]||null);
