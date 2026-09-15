@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { searchWebFast } from "@/lib/firecrawl";
 import { analyzeMarketEvents } from "@/lib/radar-ultimate-ai";
+import { runCompetitiveLandscape } from "@/lib/radar-engine-landscape";
 import { detectMovesForWorkspace } from "@/lib/radar-moves";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
@@ -22,10 +23,12 @@ export async function POST(req:Request){
     const {workspace}=await workspaceForRequest(req,true);
     if(!workspace.website)return NextResponse.json({error:"Complete startup setup first."},{status:400});
     const run=(await sbInsert("radar_scan_runs",{workspace_id:workspace.id,run_type:"workspace_refresh",status:"running"}))[0];
-    const result:any={discovery:null,deep_scans:0,market_events:0,signals_created:0,recommendations_created:0,evidence_created:0,moves_correlated:0};
+    const result:any={discovery:null,landscape:null,deep_scans:0,market_events:0,signals_created:0,recommendations_created:0,evidence_created:0,moves_correlated:0};
     try{
       const discover=await internal(req,"/api/radar/discover",{force:true});
       result.discovery={ok:discover.res.ok||Boolean(discover.data?.cooldown),inspected:discover.data?.inspected||0,promoted:discover.data?.promoted||0,entities:discover.data?.entities_extracted||0,error:discover.res.ok?null:discover.data?.error||null};
+      try{result.landscape=await runCompetitiveLandscape(workspace.id)}catch(error){result.landscape={error:error instanceof Error?error.message:"Landscape analysis failed"}}
+
       const competitors=await sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&select=*&order=threat_score.desc,product_overlap_score.desc,similarity_score.desc&limit=24`);
       const scanTargets=competitors.filter((c:any)=>c.website).slice(0,10);
       const scanResults=await Promise.allSettled(scanTargets.map((c:any)=>internal(req,"/api/radar/scan",{competitorId:c.id,quick:true})));
