@@ -1,3 +1,5 @@
+import { engineSearchConfigured, engineSearchWeb } from "@/lib/radar-engine-search";
+
 const FIRECRAWL_BASE = "https://api.firecrawl.dev/v2";
 
 export function firecrawlConfigured() {
@@ -41,29 +43,56 @@ function searchRows(payload: any): FirecrawlSearchResult[] {
   return Array.isArray(rows) ? rows.filter((row) => row?.url) : [];
 }
 
+function mergeSearchRows(primary:FirecrawlSearchResult[],secondary:FirecrawlSearchResult[],limit:number){
+  const seen=new Set<string>();
+  const merged:FirecrawlSearchResult[]=[];
+  for(const row of [...primary,...secondary]){
+    if(!row?.url||seen.has(row.url))continue;
+    seen.add(row.url);
+    merged.push(row);
+    if(merged.length>=limit)break;
+  }
+  return merged;
+}
+
+async function oldEngineRows(query:string,limit:number):Promise<FirecrawlSearchResult[]>{
+  if(!engineSearchConfigured())return[];
+  try{
+    const rows=await engineSearchWeb(query,limit);
+    return rows.map(row=>({title:row.title,description:row.description,url:row.url}));
+  }catch{return[]}
+}
+
 export async function searchWebFast(query: string, limit = 5): Promise<FirecrawlSearchResult[]> {
-  const payload = await firecrawlRequest("/search", {
-    query,
-    limit,
-    sources: ["web"],
-    ignoreInvalidURLs: true,
-  }, 18000);
-  return searchRows(payload);
+  const [firecrawlResult,engineResult]=await Promise.allSettled([
+    firecrawlRequest("/search", {query,limit,sources:["web"],ignoreInvalidURLs:true}, 18000).then(searchRows),
+    oldEngineRows(query,limit),
+  ]);
+  const fire=firecrawlResult.status==="fulfilled"?firecrawlResult.value:[];
+  const engine=engineResult.status==="fulfilled"?engineResult.value:[];
+  if(!fire.length&&!engine.length&&firecrawlResult.status==="rejected")throw firecrawlResult.reason;
+  return mergeSearchRows(fire,engine,Math.max(limit,Math.min(limit*2,12)));
 }
 
 export async function searchWeb(query: string, limit = 6): Promise<FirecrawlSearchResult[]> {
-  const payload = await firecrawlRequest("/search", {
-    query,
-    limit,
-    sources: ["web"],
-    ignoreInvalidURLs: true,
-    scrapeOptions: {
-      formats: ["markdown"],
-      onlyMainContent: true,
-      maxAge: 21600000,
-    },
-  }, 30000);
-  return searchRows(payload);
+  const [firecrawlResult,engineResult]=await Promise.allSettled([
+    firecrawlRequest("/search", {
+      query,
+      limit,
+      sources: ["web"],
+      ignoreInvalidURLs: true,
+      scrapeOptions: {
+        formats: ["markdown"],
+        onlyMainContent: true,
+        maxAge: 21600000,
+      },
+    }, 30000).then(searchRows),
+    oldEngineRows(query,limit),
+  ]);
+  const fire=firecrawlResult.status==="fulfilled"?firecrawlResult.value:[];
+  const engine=engineResult.status==="fulfilled"?engineResult.value:[];
+  if(!fire.length&&!engine.length&&firecrawlResult.status==="rejected")throw firecrawlResult.reason;
+  return mergeSearchRows(fire,engine,Math.max(limit,Math.min(limit*2,16)));
 }
 
 export async function scrapeUrl(url:string) {
