@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { createMonitor, searchWeb } from "@/lib/firecrawl";
+import { crawlStartupEngine, sourceTypeForUrl } from "@/lib/radar-engine-crawl";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
 function normalizeTerms(value: unknown): string[] {
@@ -30,17 +32,37 @@ export async function POST(req: Request) {
     const founderProducts=normalizeTerms(workspace.product_keywords).slice(0,4).join(" ");
     const founderFeatures=[...normalizeTerms(workspace.major_features),...normalizeTerms(workspace.capability_keywords)].slice(0,5).join(" ");
     const productAnchor=relatedProduct||founderProducts||competitor.name;
+
+    const pages:any[]=[];
+    const seen=new Set<string>();
+    let strategicCrawlPages=0;
+    try{
+      const crawl=await crawlStartupEngine(competitor.website,quick?5:8);
+      for(const page of crawl.pages||[]){
+        if(!page?.url||domainOf(page.url)!==domain||seen.has(page.url))continue;
+        seen.add(page.url);
+        pages.push({url:page.url,title:page.title||competitor.name,description:String(page.text||"").slice(0,1200),markdown:String(page.text||"")});
+        strategicCrawlPages++;
+      }
+      for(const feedUrl of crawl.feeds||[]){
+        const existingFeed=(await sbSelect(`radar_sources?workspace_id=eq.${workspace.id}&url=eq.${encodeURIComponent(feedUrl)}&select=id&limit=1`))[0];
+        if(!existingFeed)await sbInsert("radar_sources",{workspace_id:workspace.id,competitor_id:competitor.id,url:feedUrl,title:`${competitor.name} RSS / Atom feed`,source_type:"rss",reliability:95,priority:80,check_frequency_minutes:60,status:"active",health:"healthy",next_check_at:new Date(Date.now()+60*60000).toISOString()}).catch(()=>{});
+      }
+    }catch{}
+
     const queries=quick
       ? [`site:${domain} ${productAnchor} product features`,`site:${domain} ${productAnchor} pricing customers use case`,`site:${domain} ${founderProducts} ${founderFeatures}`]
       : [`site:${domain} ${productAnchor} product features capabilities`,`site:${domain} ${productAnchor} pricing plans packaging`,`site:${domain} ${productAnchor} customers use cases creators`,`site:${domain} ${productAnchor} docs technology AI autonomous`,`site:${domain} ${productAnchor} integrations partners launch`,`site:${domain} ${founderProducts} ${founderFeatures}`];
 
     const searchSets = await Promise.allSettled(queries.map(q=>searchWeb(q,quick?3:4)));
-    const pages:any[]=[]; const seen=new Set<string>();
     for(const set of searchSets){
       if(set.status!=="fulfilled") continue;
       for(const row of set.value){ if(!row?.url||seen.has(row.url)||domainOf(row.url)!==domain)continue; seen.add(row.url);pages.push(row); }
     }
-    if(!pages.length) pages.push(...await searchWeb(`${competitor.name} ${relatedProduct||founderProducts} official product`,4));
+    if(!pages.length){
+      const fallback=await searchWeb(`${competitor.name} ${relatedProduct||founderProducts} official product`,4);
+      for(const row of fallback){if(row?.url&&domainOf(row.url)===domain&&!seen.has(row.url)){seen.add(row.url);pages.push(row)}}
+    }
     const limitedPages = pages.filter(p=>domainOf(p.url)===domain).slice(0,quick?8:18);
 
     const corpus=limitedPages.map(p=>`${p.title||""}\n${p.description||""}\n${p.markdown||""}`).join("\n\n").toLowerCase().slice(0,quick?110000:220000);
@@ -66,8 +88,25 @@ export async function POST(req: Request) {
       ? `${productLabel} has ${productOverlap}% verified product overlap with ${workspace.name}. Overall strategic similarity is ${weighted}% and threat is ${threat}%.${matched.length?` Shared evidence includes ${matched.slice(0,8).join(", ")}.`:""}`
       : `RADAR could not verify enough first-party product evidence from ${competitor.name}. Keep this company provisional until stronger evidence is available.`;
 
-    const evidenceRows = limitedPages.slice(0,quick?6:10).map(page=>({workspace_id:workspace.id,competitor_id:competitor.id,source_url:page.url,source_type:"first_party_product_scan",title:String(page.title||`${competitor.name} product page`).slice(0,200),fact:String(page.description||`First-party page related to ${productLabel}.`).slice(0,1000),summary:String(page.markdown||page.description||"").replace(/\s+/g," ").slice(0,2200),confidence}));
+    const evidenceRows = limitedPages.slice(0,quick?6:10).map(page=>({workspace_id:workspace.id,competitor_id:competitor.id,source_url:page.url,source_type:"first_party_product_scan",title:String(page.title||`${competitor.name} product page`).slice(0,200),fact:String(page.description||`First-party page related to ${productLabel}.`).slice(0,1000),summary:String(page.markdown||page.description||"").replace(/\s+/g," ").slice(0,2200),confidence,claim_type:"fact"}));
     if(evidenceRows.length) await sbInsert("radar_evidence",evidenceRows);
+
+    const existingSources=await sbSelect(`radar_sources?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=id,url&limit=500`);
+    const sourceMap=new Map(existingSources.map((s:any)=>[String(s.url),s]));
+    for(const page of limitedPages.slice(0,12)){
+      let source:any=sourceMap.get(page.url);
+      if(!source){
+        const type=sourceTypeForUrl(page.url);
+        const rows=await sbInsert("radar_sources",{workspace_id:workspace.id,competitor_id:competitor.id,url:page.url,title:String(page.title||page.url).slice(0,240),source_type:type,reliability:95,priority:type==="pricing"?95:type==="product"||type==="changelog"?90:Math.max(65,threat),check_frequency_minutes:type==="pricing"?120:threat>=75?60:360,status:"active",health:"healthy",next_check_at:new Date(Date.now()+(type==="pricing"?120:threat>=75?60:360)*60000).toISOString()}).catch(()=>[]);
+        source=rows[0];if(source)sourceMap.set(page.url,source);
+      }
+      const text=String(page.markdown||page.description||"").replace(/\s+/g," ").trim().slice(0,60000);
+      if(source?.id&&text.length>=80){
+        const contentHash=createHash("sha256").update(text).digest("hex");
+        const latest=(await sbSelect(`radar_snapshots?source_id=eq.${source.id}&select=id,content_hash&order=fetched_at.desc&limit=1`))[0];
+        if(!latest||latest.content_hash!==contentHash)await sbInsert("radar_snapshots",{source_id:source.id,content_hash:contentHash,content_text:text,metadata:{baseline:!latest,title:page.title||"",url:page.url,origin:"deep_scan"}}).catch(()=>{});
+      }
+    }
 
     const dims={problem_overlap:problem,customer_overlap:customer,buyer_overlap:buyer,product_overlap:productOverlap,workflow_overlap:workflow,feature_overlap:feature,technology_overlap:technology,business_model_overlap:business,distribution_overlap:distribution,geography_overlap:geography,updated_at:new Date().toISOString()};
     const existingDims=await sbSelect(`radar_similarity_dimensions?competitor_id=eq.${competitor.id}&select=id`);
@@ -95,7 +134,7 @@ export async function POST(req: Request) {
     }
 
     await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:limitedPages.length,findings:matched.length,finished_at:new Date().toISOString()});
-    return NextResponse.json({similarity:weighted,product_overlap:productOverlap,threat,movement,category,matched,dimensions:dims,why,pages_scanned:limitedPages.length,monitor_active:monitorActive,quick,confidence});
+    return NextResponse.json({similarity:weighted,product_overlap:productOverlap,threat,movement,category,matched,dimensions:dims,why,pages_scanned:limitedPages.length,strategic_crawl_pages:strategicCrawlPages,monitor_active:monitorActive,quick,confidence});
   } catch (error) {
     if(error instanceof Error&&error.message==="UNAUTHORIZED") return NextResponse.json({error:"Unauthorized"},{status:401});
     return NextResponse.json({error:error instanceof Error?error.message:"Scan failed"},{status:500});
