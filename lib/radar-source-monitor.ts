@@ -1,5 +1,6 @@
-import { createHash } from "crypto";
+import { createHash } from "node:crypto";
 import { scrapeUrl } from "@/lib/firecrawl";
+import { fetchSnapshotEngine } from "@/lib/radar-engine-crawl";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { analyzeSemanticChange, normalizeSnapshotText } from "@/lib/radar-semantic";
 import { detectMovesForWorkspace } from "@/lib/radar-moves";
@@ -35,6 +36,18 @@ export async function ensureWorkspaceSources(workspaceId:string){
   return{added:rows.length};
 }
 
+async function fetchCurrentSnapshot(url:string){
+  try{
+    const direct=await fetchSnapshotEngine(url);
+    const text=normalizeSnapshotText(direct.text||"");
+    if(text.length>=80)return{text,contentHash:direct.hash||hash(text),title:direct.title||"",url:direct.url||url,provider:"direct"};
+  }catch{}
+  const page=await scrapeUrl(url);
+  const text=normalizeSnapshotText(page.markdown||"");
+  if(!text||text.length<80)throw new Error("Source returned too little meaningful text");
+  return{text,contentHash:hash(text),title:page.title||"",url:page.url||url,provider:"firecrawl"};
+}
+
 async function findDuplicateSignal(workspaceId:string,competitorId:string,change:any){
   const recent=await sbSelect(`radar_signals?workspace_id=eq.${workspaceId}&competitor_id=eq.${competitorId}&select=id,title,summary,signal_type&order=observed_at.desc&limit=30`);
   return recent.find((s:any)=>String(s.signal_type||"")===String(change.category||"")&&Math.max(overlap(s.title,change.title),overlap(s.summary,change.summary))>=.58)||null;
@@ -46,18 +59,18 @@ export async function runWorkspaceSourceMonitor(workspaceId:string,limit=16){
   const competitors=await sbSelect(`radar_competitors?workspace_id=eq.${workspaceId}&select=id,name,website,threat_score,related_product&limit=200`);
   const byId=new Map(competitors.map((c:any)=>[c.id,c]));
   const sources=await sbSelect(`radar_sources?workspace_id=eq.${workspaceId}&status=eq.active&or=(next_check_at.is.null,next_check_at.lte.${encodeURIComponent(new Date().toISOString())})&select=*&order=priority.desc,next_check_at.asc&limit=${limit}`);
-  const result={checked:0,changed:0,signals:0,failed:0,unchanged:0};
+  const result={checked:0,changed:0,signals:0,failed:0,unchanged:0,direct:0,firecrawl:0};
 
   for(const source of sources){
     result.checked++;
     const competitor:any=byId.get(source.competitor_id);
     try{
-      const page=await scrapeUrl(source.url);
-      const text=normalizeSnapshotText(page.markdown||"");
-      if(!text||text.length<80)throw new Error("Source returned too little meaningful text");
-      const contentHash=hash(text);
+      const page=await fetchCurrentSnapshot(source.url);
+      if(page.provider==="direct")result.direct++;else result.firecrawl++;
+      const text=page.text;
+      const contentHash=page.contentHash;
       const previous=(await sbSelect(`radar_snapshots?source_id=eq.${source.id}&select=*&order=fetched_at.desc&limit=1`))[0]||null;
-      await sbInsert("radar_snapshots",{source_id:source.id,content_hash:contentHash,content_text:text,metadata:{title:page.title,url:page.url}});
+      await sbInsert("radar_snapshots",{source_id:source.id,content_hash:contentHash,content_text:text,metadata:{title:page.title,url:page.url,provider:page.provider}});
       const minutes=Math.max(30,Number(source.check_frequency_minutes||360));
       await sbUpdate("radar_sources",`id=eq.${source.id}`,{health:"healthy",last_checked_at:new Date().toISOString(),last_success_at:new Date().toISOString(),last_error:null,next_check_at:new Date(Date.now()+minutes*60000).toISOString(),updated_at:new Date().toISOString()});
       if(!previous){result.unchanged++;continue}
