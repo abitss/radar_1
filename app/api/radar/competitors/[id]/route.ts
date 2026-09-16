@@ -12,7 +12,8 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     const rows = await sbSelect(`radar_competitors?id=eq.${encodeURIComponent(id)}&workspace_id=eq.${workspace.id}&select=*&limit=1`);
     const competitor = rows[0];
     if (!competitor) return NextResponse.json({ error: "Competitor not found" }, { status: 404 });
-    const [dimensions,evidence,signals,recommendations,monitors,sources,moves,decisions] = await Promise.all([
+
+    const [dimensions,evidence,signals,recommendations,monitors,sources,moves] = await Promise.all([
       sbSelect(`radar_similarity_dimensions?competitor_id=eq.${competitor.id}&select=*&limit=1`),
       sbSelect(`radar_evidence?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=observed_at.desc&limit=100`),
       sbSelect(`radar_signals?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=observed_at.desc&limit=60`),
@@ -20,8 +21,16 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
       sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=created_at.desc&limit=30`),
       sbSelect(`radar_sources?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=priority.desc,updated_at.desc&limit=100`).catch(()=>[]),
       sbSelect(`radar_moves?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=updated_at.desc&limit=30`).catch(()=>[]),
-      sbSelect(`radar_decisions?workspace_id=eq.${workspace.id}&move_id=in.(${encodeURIComponent((await sbSelect(`radar_moves?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=id&limit=30`).catch(()=>[])).map((m:any)=>m.id).join(','))})&select=*&order=updated_at.desc&limit=30`).catch(()=>[]),
     ]);
+
+    let decisions:any[]=[];
+    if(moves.length){
+      const moveIds=moves.map((m:any)=>String(m.id)).filter(Boolean);
+      if(moveIds.length){
+        decisions=await sbSelect(`radar_decisions?workspace_id=eq.${workspace.id}&move_id=in.(${moveIds.join(",")})&select=*&order=updated_at.desc&limit=30`).catch(()=>[]);
+      }
+    }
+
     const activeMonitor=monitors.find((m:any)=>m.status==="active")||null;
     const healthySources=sources.filter((s:any)=>s.status==="active"&&s.health==="healthy").length;
     const verification_status=competitor.last_scanned_at?"verified":evidence.length?"evidence-backed":"provisional";
