@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { sbSelect, sbUpdate } from "@/lib/radar-db";
 import { runCompetitiveLandscape } from "@/lib/radar-engine-landscape";
+import { companyBrainReadiness } from "@/lib/radar-profile";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
 async function callInternal(req:Request,path:string,body?:any){
@@ -18,7 +19,9 @@ export async function POST(req:Request){
   let job:any=null;
   try{
     const {workspace}=await workspaceForRequest(req,true);
-    if(!workspace.website)return NextResponse.json({error:"Startup website is required before RADAR can initialize."},{status:400});
+    const readiness=companyBrainReadiness(workspace);
+    if(!readiness.ready)return NextResponse.json({error:`Company Brain is incomplete. Missing: ${readiness.missing.join(", ")}.`,company_brain:readiness},{status:400});
+
     const activeJobs=await sbSelect(`radar_jobs?workspace_id=eq.${workspace.id}&job_type=eq.initial_intelligence&status=in.(queued,running)&select=*&order=created_at.asc&limit=1`);
     job=activeJobs[0]||null;
     if(job){const updates:any={status:"running",attempts:Number(job.attempts||0)+1,started_at:job.started_at||new Date().toISOString(),current_step:"company_brain",progress:5,updated_at:new Date().toISOString(),error:null};const updated=await sbUpdate("radar_jobs",`id=eq.${job.id}`,updates);job=updated[0]||{...job,...updates};}
@@ -27,9 +30,13 @@ export async function POST(req:Request){
     const progress=async(step:string,value:number)=>{if(job?.id){const rows=await sbUpdate("radar_jobs",`id=eq.${job.id}`,{current_step:step,progress:value,updated_at:new Date().toISOString()});job=rows[0]||job}};
 
     await progress("company_brain",10);
-    const boot=await callInternal(req,"/api/radar/bootstrap",{website:workspace.website});
-    steps.push({step:"company_brain",ok:boot.res.ok,error:boot.data?.error||null,engine:boot.data?.engine||null});
-    if(!boot.res.ok)throw new Error(boot.data?.error||"Company Brain build failed");
+    if(workspace.website){
+      const boot=await callInternal(req,"/api/radar/bootstrap",{website:workspace.website});
+      steps.push({step:"company_brain",ok:boot.res.ok,error:boot.data?.error||null,engine:boot.data?.engine||null,input:"founder_form+website"});
+      if(!boot.res.ok)steps.push({step:"website_enrichment",ok:false,error:boot.data?.error||"Website enrichment failed; continuing from founder Company Brain."});
+    }else{
+      steps.push({step:"company_brain",ok:true,input:"founder_form",website_optional:true});
+    }
 
     await progress("market_discovery",26);
     const discover=await callInternal(req,"/api/radar/discover",{force:true});
@@ -43,7 +50,7 @@ export async function POST(req:Request){
 
     await progress("competitor_verification",50);
     const competitors=await sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&select=*&order=product_overlap_score.desc,threat_score.desc,similarity_score.desc&limit=12`);
-    const scanTargets=competitors.slice(0,8);
+    const scanTargets=competitors.filter((c:any)=>c.website).slice(0,8);
     const scanResults=await Promise.allSettled(scanTargets.map((c:any)=>callInternal(req,"/api/radar/scan",{competitorId:c.id,quick:true})));
     const scanned=scanResults.filter((r:any)=>r.status==="fulfilled"&&(r.value.res.ok||r.value.data?.cooldown)).length;
     steps.push({step:"deep_scan",ok:true,requested:scanTargets.length,completed:scanned});
@@ -68,7 +75,7 @@ export async function POST(req:Request){
       sbSelect(`radar_signals?workspace_id=eq.${workspace.id}&select=id&limit=1000`),
       sbSelect(`radar_recommendations?workspace_id=eq.${workspace.id}&select=id&limit=1000`)
     ]);
-    const result={competitors:finalCompetitors.length,evidence:evidence.length,signals:signals.length,recommendations:recommendations.length,landscape};
+    const result={input:"company_brain",website_enrichment:Boolean(workspace.website),competitors:finalCompetitors.length,evidence:evidence.length,signals:signals.length,recommendations:recommendations.length,landscape};
     await sbUpdate("radar_workspaces",`id=eq.${workspace.id}`,{initial_scan_status:"completed",initial_scan_completed_at:new Date().toISOString(),initial_scan_error:null,updated_at:new Date().toISOString()});
     if(job?.id)await sbUpdate("radar_jobs",`id=eq.${job.id}`,{status:"completed",current_step:"completed",progress:100,result,completed_at:new Date().toISOString(),updated_at:new Date().toISOString(),error:null});
     return NextResponse.json({ok:true,steps,output:result});
