@@ -12,6 +12,11 @@ function apiKey() {
   return key;
 }
 
+function isTransientFirecrawlError(error:unknown){
+  const message=error instanceof Error?error.message:String(error||"");
+  return /(rate limit|too many requests|\b429\b|retry after|timeout|timed out|fetch failed|econnreset|etimedout|temporarily unavailable|\b502\b|\b503\b|\b504\b)/i.test(message);
+}
+
 async function firecrawlRequest(path: string, body: unknown, timeoutMs = 30000) {
   const response = await fetch(`${FIRECRAWL_BASE}${path}`, {
     method: "POST",
@@ -27,7 +32,10 @@ async function firecrawlRequest(path: string, body: unknown, timeoutMs = 30000) 
   const text = await response.text();
   let data: any;
   try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
-  if (!response.ok) throw new Error(data?.error || data?.message || `Firecrawl request failed with HTTP ${response.status}`);
+  if (!response.ok) {
+    const message=data?.error || data?.message || `Firecrawl request failed with HTTP ${response.status}`;
+    throw new Error(`${message}${response.status===429?" [HTTP 429]":""}`);
+  }
   return data;
 }
 
@@ -64,34 +72,44 @@ async function oldEngineRows(query:string,limit:number):Promise<FirecrawlSearchR
 }
 
 export async function searchWebFast(query: string, limit = 5): Promise<FirecrawlSearchResult[]> {
-  const [firecrawlResult,engineResult]=await Promise.allSettled([
-    firecrawlRequest("/search", {query,limit,sources:["web"],ignoreInvalidURLs:true}, 18000).then(searchRows),
-    oldEngineRows(query,limit),
-  ]);
-  const fire=firecrawlResult.status==="fulfilled"?firecrawlResult.value:[];
-  const engine=engineResult.status==="fulfilled"?engineResult.value:[];
-  if(!fire.length&&!engine.length&&firecrawlResult.status==="rejected")throw firecrawlResult.reason;
+  const tasks:Promise<FirecrawlSearchResult[]>[]=[];
+  if(firecrawlConfigured())tasks.push(firecrawlRequest("/search", {query,limit,sources:["web"],ignoreInvalidURLs:true}, 18000).then(searchRows));
+  tasks.push(oldEngineRows(query,limit));
+  const settled=await Promise.allSettled(tasks);
+  const fireIndex=firecrawlConfigured()?0:-1;
+  const fire=fireIndex>=0&&settled[fireIndex]?.status==="fulfilled"?(settled[fireIndex] as PromiseFulfilledResult<FirecrawlSearchResult[]>).value:[];
+  const engineResult=settled[settled.length-1];
+  const engine=engineResult?.status==="fulfilled"?engineResult.value:[];
+  if(!fire.length&&!engine.length&&fireIndex>=0&&settled[fireIndex]?.status==="rejected"){
+    const error=(settled[fireIndex] as PromiseRejectedResult).reason;
+    if(!isTransientFirecrawlError(error))throw error;
+  }
   return mergeSearchRows(fire,engine,Math.max(limit,Math.min(limit*2,12)));
 }
 
 export async function searchWeb(query: string, limit = 6): Promise<FirecrawlSearchResult[]> {
-  const [firecrawlResult,engineResult]=await Promise.allSettled([
-    firecrawlRequest("/search", {
-      query,
-      limit,
-      sources: ["web"],
-      ignoreInvalidURLs: true,
-      scrapeOptions: {
-        formats: ["markdown"],
-        onlyMainContent: true,
-        maxAge: 21600000,
-      },
-    }, 30000).then(searchRows),
-    oldEngineRows(query,limit),
-  ]);
-  const fire=firecrawlResult.status==="fulfilled"?firecrawlResult.value:[];
-  const engine=engineResult.status==="fulfilled"?engineResult.value:[];
-  if(!fire.length&&!engine.length&&firecrawlResult.status==="rejected")throw firecrawlResult.reason;
+  const tasks:Promise<FirecrawlSearchResult[]>[]=[];
+  if(firecrawlConfigured())tasks.push(firecrawlRequest("/search", {
+    query,
+    limit,
+    sources: ["web"],
+    ignoreInvalidURLs: true,
+    scrapeOptions: {
+      formats: ["markdown"],
+      onlyMainContent: true,
+      maxAge: 21600000,
+    },
+  }, 30000).then(searchRows));
+  tasks.push(oldEngineRows(query,limit));
+  const settled=await Promise.allSettled(tasks);
+  const fireIndex=firecrawlConfigured()?0:-1;
+  const fire=fireIndex>=0&&settled[fireIndex]?.status==="fulfilled"?(settled[fireIndex] as PromiseFulfilledResult<FirecrawlSearchResult[]>).value:[];
+  const engineResult=settled[settled.length-1];
+  const engine=engineResult?.status==="fulfilled"?engineResult.value:[];
+  if(!fire.length&&!engine.length&&fireIndex>=0&&settled[fireIndex]?.status==="rejected"){
+    const error=(settled[fireIndex] as PromiseRejectedResult).reason;
+    if(!isTransientFirecrawlError(error))throw error;
+  }
   return mergeSearchRows(fire,engine,Math.max(limit,Math.min(limit*2,16)));
 }
 
