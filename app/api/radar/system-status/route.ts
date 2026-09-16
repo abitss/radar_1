@@ -6,12 +6,14 @@ import { companyBrainReadiness } from "@/lib/radar-profile";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 import { sbSelect } from "@/lib/radar-db";
 
+function timeOf(raw:any){const t=raw?new Date(raw).getTime():0;return Number.isFinite(t)?t:0}
+
 export async function GET(req: Request) {
   try {
     const { workspace } = await workspaceForRequest(req, true);
     const [monitors, scans, competitors, signals, evidence, briefings, feedback, tasks, sources] = await Promise.all([
       sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&select=id,monitor_type,status,last_event_at,last_error,schedule_text,competitor_id&order=created_at.desc&limit=200`),
-      sbSelect(`radar_scan_runs?workspace_id=eq.${workspace.id}&select=id,run_type,status,started_at,finished_at,pages_scanned,findings,error&order=started_at.desc&limit=30`),
+      sbSelect(`radar_scan_runs?workspace_id=eq.${workspace.id}&select=id,run_type,status,started_at,finished_at,pages_scanned,findings,error&order=started_at.desc&limit=50`),
       sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&select=id,monitoring_preference,last_scanned_at&limit=200`),
       sbSelect(`radar_signals?workspace_id=eq.${workspace.id}&select=id,impact_score,confidence,observed_at&order=observed_at.desc&limit=200`),
       sbSelect(`radar_evidence?workspace_id=eq.${workspace.id}&select=id,competitor_id,source_url,confidence,observed_at&order=observed_at.desc&limit=1000`),
@@ -30,13 +32,25 @@ export async function GET(req: Request) {
     const explicitlyMonitored=competitors.filter((c:any)=>c.monitoring_preference==="monitor"||monitoredIds.has(String(c.id))).length;
     const verified=competitors.filter((c:any)=>Boolean(c.last_scanned_at)).length;
     const coveredCompetitors=new Set(evidence.map((e:any)=>e.competitor_id).filter(Boolean).map(String)).size;
-    const healthySources=sources.filter((s:any)=>s.status==="active"&&s.health!=="failed").length;
+    const healthySources=sources.filter((s:any)=>s.status==="active"&&s.health==="healthy").length;
+    const sourceErrors=sources.filter((s:any)=>s.status==="active"&&["error","failed"].includes(String(s.health||""))).length;
     const runningScans=scans.filter((s:any)=>s.status==="running");
-    const failed=scans.find((s:any)=>s.status==="failed")||null;
-    const latestCompleted=scans.find((s:any)=>s.status==="completed")||null;
+    const completedScans=scans.filter((s:any)=>s.status==="completed");
+    const latestCompleted=completedScans[0]||null;
+
+    // A failed run is actionable only until the same pipeline succeeds again. Keeping recovered
+    // failures in the dashboard made fixed schema/provider incidents look permanently broken.
+    const unresolvedFailures=scans.filter((failed:any)=>{
+      if(failed.status!=="failed")return false;
+      const failedAt=Math.max(timeOf(failed.finished_at),timeOf(failed.started_at));
+      return !completedScans.some((success:any)=>success.run_type===failed.run_type&&Math.max(timeOf(success.finished_at),timeOf(success.started_at))>failedAt);
+    });
+    const recentFailure=unresolvedFailures[0]||null;
+
     const lastMonitorEvent=activeMonitors.map((m:any)=>m.last_event_at).filter(Boolean).sort().reverse()[0]||null;
-    const recurringActive=tasks.length>0;
-    const schedulingActive=Boolean(discovery)||recurringActive||entityMonitors.length>0;
+    const recurringConfigured=tasks.length>0;
+    const providerMonitoringActive=Boolean(discovery)||entityMonitors.length>0;
+    const schedulingActive=providerMonitoringActive;
 
     const checks=[
       {key:"workspace",label:"Founder Company Brain complete",done:brain.ready},
@@ -44,7 +58,7 @@ export async function GET(req: Request) {
       {key:"competitors",label:"Relevant competitor universe",done:competitors.length>0},
       {key:"verified",label:"At least one first-party verified competitor",done:verified>0},
       {key:"source_coverage",label:"Evidence/source coverage",done:evidence.some((e:any)=>Boolean(e.source_url))},
-      {key:"monitoring",label:"Continuous intelligence scheduling active",done:schedulingActive},
+      {key:"monitoring",label:"Continuous provider monitoring active",done:providerMonitoringActive},
       {key:"signals",label:"Structured signals available",done:signals.length>0},
       {key:"weekly_brief",label:"Weekly briefing generated",done:briefings.some((b:any)=>b.period==="weekly")},
       {key:"ask",label:"Ask RADAR intelligence layer",done:Boolean(ai.configured)},
@@ -62,6 +76,7 @@ export async function GET(req: Request) {
         active:schedulingActive,
         provider_monitor:Boolean(discovery),
         recurring_tasks:tasks.length,
+        recurring_tasks_configured:recurringConfigured,
         active_monitors:activeMonitors.length,
         entity_monitors:entityMonitors.length,
         schedule:discovery?.schedule_text||null,
@@ -77,17 +92,19 @@ export async function GET(req: Request) {
         signals:signals.length,
         sources:sources.length,
         healthy_sources:healthySources,
+        source_errors:sourceErrors,
         briefings:briefings.length,
       },
       scans:{
         latest:scans[0]||null,
         latest_completed:latestCompleted,
-        recent_failure:failed,
+        recent_failure:recentFailure,
+        unresolved_failures:unresolvedFailures.length,
         running:runningScans.length,
         running_items:runningScans.slice(0,5),
       },
       beta:{checks,completed,total:requiredChecks.length,percent:Math.round((completed/Math.max(1,requiredChecks.length))*100)},
-      launch_ready:Boolean(brain.ready&&ai.configured&&competitors.length>0&&schedulingActive),
+      launch_ready:Boolean(brain.ready&&ai.configured&&competitors.length>0&&providerMonitoringActive),
     });
   } catch (error) {
     if(error instanceof Error&&error.message==="UNAUTHORIZED")return NextResponse.json({error:"Unauthorized"},{status:401});
