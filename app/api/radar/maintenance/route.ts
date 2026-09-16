@@ -4,7 +4,8 @@ import { runWorkspaceSourceMonitor, scheduleWorkspaceRecurringTasks } from "@/li
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
 async function internal(req:Request,path:string,body?:any){
-  const url=new URL(path,req.url);const headers:any={"Content-Type":"application/json"};
+  const base=process.env.PORT?`http://127.0.0.1:${process.env.PORT}`:req.url;
+  const url=new URL(path,base);const headers:any={"Content-Type":"application/json"};
   const cookie=req.headers.get("cookie");if(cookie)headers.cookie=cookie;
   const systemWorkspace=req.headers.get("x-radar-system-workspace");if(systemWorkspace)headers["x-radar-system-workspace"]=systemWorkspace;
   const apiKey=req.headers.get("x-radar-api-key");if(apiKey)headers["x-radar-api-key"]=apiKey;
