@@ -1,6 +1,9 @@
+import { radarEngineText } from "@/lib/radar-engine-ai";
+
 export type EngineSearchResult={title:string;url:string;description:string;score:number;provider:string};
 
 function hasKey(provider:string){
+  if(provider==="openrouter")return Boolean(process.env.OPENROUTER_API_KEY);
   if(provider==="tavily")return Boolean(process.env.TAVILY_API_KEY);
   if(provider==="brave")return Boolean(process.env.BRAVE_SEARCH_API_KEY);
   if(provider==="serper")return Boolean(process.env.SERPER_API_KEY);
@@ -23,24 +26,59 @@ function firstPublicUrl(text:string){
   return null;
 }
 
-function dedupe(items:EngineSearchResult[]){const seen=new Set<string>();return items.filter(item=>item?.url&&!seen.has(item.url)&&Boolean(seen.add(item.url)))}
+function dedupe(items:EngineSearchResult[]){
+  const seen=new Set<string>();
+  return items.filter(item=>{
+    if(!item?.url||seen.has(item.url))return false;
+    seen.add(item.url);return true;
+  });
+}
 
 export function configuredEngineSearchProvider(){
   const requested=String(process.env.SEARCH_PROVIDER||"auto").toLowerCase();
   if(requested&&requested!=="auto")return hasKey(requested)?requested:null;
-  for(const provider of ["tavily","brave","serper"])if(hasKey(provider))return provider;
+  for(const provider of ["tavily","brave","serper","openrouter"])if(hasKey(provider))return provider;
   return null;
 }
 
-export function engineSearchConfigured(){return Boolean(configuredEngineSearchProvider())}
+export function engineSearchConfigured(){
+  return Boolean(configuredEngineSearchProvider()||process.env.OPENROUTER_API_KEY);
+}
 
 export async function engineSearchWeb(query:string,maxResults=8):Promise<EngineSearchResult[]>{
   const provider=configuredEngineSearchProvider();
-  if(!provider)return[];
-  if(provider==="tavily")return searchTavily(query,maxResults);
-  if(provider==="brave")return searchBrave(query,maxResults);
-  if(provider==="serper")return searchSerper(query,maxResults);
-  return[];
+  const supplemental=Boolean(process.env.OPENROUTER_API_KEY)&&String(process.env.OPENROUTER_LIVE_WEB_ENABLED||"true").toLowerCase()!=="false";
+  const tasks:Promise<EngineSearchResult[]>[]=[];
+
+  if(provider==="tavily")tasks.push(searchTavily(query,maxResults));
+  else if(provider==="brave")tasks.push(searchBrave(query,maxResults));
+  else if(provider==="serper")tasks.push(searchSerper(query,maxResults));
+  else if(provider==="openrouter")tasks.push(searchOpenRouter(query,maxResults));
+
+  if(supplemental&&provider!=="openrouter")tasks.push(searchOpenRouter(query,Math.min(maxResults,8)));
+  if(!tasks.length)return[];
+
+  const settled=await Promise.allSettled(tasks);
+  const rows:EngineSearchResult[]=[];
+  for(const item of settled)if(item.status==="fulfilled")rows.push(...item.value);
+  return dedupe(rows).slice(0,Math.max(maxResults,Math.min(maxResults*2,16)));
+}
+
+async function searchOpenRouter(query:string,maxResults:number):Promise<EngineSearchResult[]>{
+  if(!process.env.OPENROUTER_API_KEY)return[];
+  const result=await radarEngineText(
+    `Find current public-web sources relevant to this competitive-intelligence query: ${query}\n\nPrioritize first-party company pages, official product/pricing pages, reputable news, filings, press releases, launch announcements, hiring/careers pages, partnerships and customer announcements. Do not fabricate URLs. Summarize the evidence you found in a few concise sentences.`,
+    {feature:"live_web_discovery",web:true,maxTokens:1200,temperature:0.02}
+  );
+  const citations=Array.isArray(result.citations)?result.citations:[];
+  const summary=String(result.text||"").replace(/\s+/g," ").trim().slice(0,2400);
+  return citations.slice(0,maxResults).map((citation,index)=>({
+    title:String(citation.title||`Live web source ${index+1}`).slice(0,240),
+    url:String(citation.url),
+    description:summary||`OpenRouter live-web evidence for: ${query}`,
+    score:Math.max(.45,1-index*.04),
+    provider:"openrouter-web",
+  }));
 }
 
 async function extractTavily(url:string){
