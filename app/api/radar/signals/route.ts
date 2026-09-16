@@ -16,16 +16,16 @@ export async function GET(req: Request) {
       sbSelect(`radar_move_signals?select=move_id,signal_id,contribution&limit=5000`).catch(()=>[]),
       sbSelect(`radar_moves?workspace_id=eq.${workspace.id}&select=id,competitor_id,title,move_type,summary,confidence,impact_score,status,updated_at&limit=500`).catch(()=>[]),
     ]);
-    const byId = new Map(competitors.map((c:any)=>[c.id,c]));
-    const moveById=new Map(moves.map((m:any)=>[m.id,m]));
+    const byId = new Map<string,any>(competitors.map((c:any)=>[String(c.id),c] as [string,any]));
+    const moveById = new Map<string,any>(moves.map((m:any)=>[String(m.id),m] as [string,any]));
     const linksBySignal=new Map<string,any[]>();
-    for(const link of links){if(!link.signal_id)continue;const list=linksBySignal.get(link.signal_id)||[];list.push(link);linksBySignal.set(link.signal_id,list)}
+    for(const link of links){if(!link.signal_id)continue;const key=String(link.signal_id);const list=linksBySignal.get(key)||[];list.push(link);linksBySignal.set(key,list)}
     const evidenceByCompetitor=new Map<string,any[]>();
     for(const e of evidence){const key=String(e.competitor_id||"");if(!key)continue;const list=evidenceByCompetitor.get(key)||[];list.push(e);evidenceByCompetitor.set(key,list)}
 
     return NextResponse.json(signals.map((s:any)=>{
-      const competitor=s.competitor_id?byId.get(s.competitor_id)||null:null;
-      const linkedMoves=(linksBySignal.get(s.id)||[]).map((link:any)=>{const move:any=moveById.get(link.move_id);return move?{...move,contribution:Number(link.contribution||0)}:null}).filter(Boolean).sort((a:any,b:any)=>Number(b.contribution||0)-Number(a.contribution||0));
+      const competitor:any=s.competitor_id?byId.get(String(s.competitor_id))||null:null;
+      const linkedMoves=(linksBySignal.get(String(s.id))||[]).map((link:any)=>{const move:any=moveById.get(String(link.move_id));return move?{...move,contribution:Number(link.contribution||0)}:null}).filter(Boolean).sort((a:any,b:any)=>Number(b.contribution||0)-Number(a.contribution||0));
       const candidates=(evidenceByCompetitor.get(String(s.competitor_id||""))||[]).filter((e:any)=>Math.abs(new Date(e.observed_at||e.created_at||0).getTime()-new Date(s.observed_at||s.created_at||0).getTime())<=7*24*60*60*1000);
       const supporting=[...candidates].sort((a:any,b:any)=>sortByDistance(s,a)-sortByDistance(s,b)).slice(0,4);
       return{
