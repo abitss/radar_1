@@ -15,6 +15,7 @@ function tokens(value:unknown){return [...new Set(terms(value).flatMap(x=>x.toLo
 function domainOf(raw:string){try{return new URL(raw).hostname.replace(/^www\./,"").toLowerCase()}catch{return""}}
 function originOf(raw:string){try{return new URL(raw).origin}catch{return raw}}
 function cleanCompanyName(value:string){return String(value||"").replace(/\s+/g," ").trim().replace(/[|–—-].*$/,"").trim().slice(0,100)}
+function validCompanyName(value:string){const name=cleanCompanyName(value);return name.length>=3&&/[a-z]{2,}/i.test(name)&&!/^https?:/i.test(name)}
 function scoreGroup(text:string,values:unknown,weight:number){
   const phrases=terms(values).map(x=>x.toLowerCase());const toks=tokens(values);
   if(!phrases.length&&!toks.length)return 0;
@@ -62,9 +63,9 @@ function baseQueries(workspace:any){
   return [...q].filter(Boolean).slice(0,12);
 }
 
-const sourceDomains=["wikipedia.org","ycombinator.com","crunchbase.com","tracxn.com","wellfound.com","linkedin.com","youtube.com","reddit.com","news.mit.edu","mit.edu","caltech.edu","techcrunch.com","forbes.com","reuters.com","bloomberg.com","medium.com","cbinsights.com","g2.com","capterra.com","producthunt.com"];
+const sourceDomains=["wikipedia.org","ycombinator.com","crunchbase.com","tracxn.com","wellfound.com","linkedin.com","youtube.com","reddit.com","news.mit.edu","mit.edu","caltech.edu","techcrunch.com","forbes.com","reuters.com","bloomberg.com","medium.com","cbinsights.com","g2.com","capterra.com","producthunt.com","ncbi.nlm.nih.gov","pmc.ncbi.nlm.nih.gov","dl.acm.org","aws.amazon.com","oracle.com","edtechimpact.com"];
 function sourceLike(domain:string){return sourceDomains.some(x=>domain===x||domain.endsWith(`.${x}`))}
-function articleLike(result:any){const d=domainOf(result.url);const text=`${result.title||""} ${result.description||""}`.toLowerCase();return sourceLike(d)||/(top\s+\d+|best\s+.*companies|startups funded|news|review|list of|companies to watch|researchers|study|report)/i.test(text)}
+function articleLike(result:any){const d=domainOf(result.url);const text=`${result.title||""} ${result.description||""}`.toLowerCase();return sourceLike(d)||/(top\s+\d+|best\s+.*companies|startups funded|news|review|list of|companies to watch|researchers|study|report|journal|paper|guide|introduction to|trends)/i.test(text)}
 
 async function searchAll(query:string,limit=8){
   const tasks:Promise<any[]>[]=[];
@@ -104,8 +105,6 @@ export async function POST(req:Request){
     if(!firecrawlConfigured()&&!engineSearchConfigured())return NextResponse.json({error:"No public-web search provider is configured."},{status:503});
     const body=await req.json().catch(()=>({}));
 
-    // Discovery is intentionally single-flight per workspace. Several RADAR surfaces can
-    // request discovery at nearly the same time, so force=true must not create parallel runs.
     const activeCutoff=new Date(Date.now()-10*60*1000).toISOString();
     const active=await sbSelect(`radar_scan_runs?workspace_id=eq.${workspace.id}&run_type=eq.market_discovery&status=eq.running&started_at=gte.${encodeURIComponent(activeCutoff)}&select=id,started_at&order=started_at.asc&limit=1`);
     if(active[0])return NextResponse.json({error:"Market discovery is already running for this workspace.",cooldown:true,running:true,run_id:active[0].id},{status:429});
@@ -114,8 +113,6 @@ export async function POST(req:Request){
     if(recent[0]?.finished_at&&Date.now()-new Date(recent[0].finished_at).getTime()<90*1000)return NextResponse.json({error:"Market discovery was just run. Showing the latest results.",cooldown:true},{status:429});
 
     run=(await sbInsert("radar_scan_runs",{workspace_id:workspace.id,run_type:"market_discovery",status:"running"}))[0];
-
-    // Close the tiny race where two requests both pass the pre-insert check.
     await sleep(180);
     const contenders=await sbSelect(`radar_scan_runs?workspace_id=eq.${workspace.id}&run_type=eq.market_discovery&status=eq.running&started_at=gte.${encodeURIComponent(activeCutoff)}&select=id,started_at&order=started_at.asc&limit=3`);
     if(contenders[0]?.id&&contenders[0].id!==run?.id){
@@ -147,8 +144,6 @@ export async function POST(req:Request){
     for(const set of searches){if(set.status!=="fulfilled")continue;inspected+=set.value.results.length;for(const r of set.value.results)raw.push({...r,source_query:set.value.query})}
     const deduped=[...new Map(raw.filter(r=>domainOf(r.url)&&(!ownDomain||domainOf(r.url)!==ownDomain)).map(r=>[r.url,r])).values()].slice(0,140) as any[];
 
-    // A transient empty provider response must not turn an already-populated workspace into
-    // a failed workspace. Keep the existing intelligence and report a degraded successful run.
     if(!deduped.length){
       if(existingCandidates.length||existingCompetitors.length){
         await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:0,findings:0,finished_at:new Date().toISOString()});
@@ -163,10 +158,10 @@ export async function POST(req:Request){
     for(const result of deduped){
       const sourceDomain=domainOf(result.url);const analysis:any=analysisByUrl.get(result.url);
       if(analysis?.companies?.length){
-        for(const c of analysis.companies){const name=cleanCompanyName(c.name);if(!name)continue;entities.push({name,official_website:c.official_website||"",related_product:c.related_product||"",relationship_reason:c.relationship_reason||result.description||"",relation_confidence:Number(c.relation_confidence||0),product_overlap_score:Number(c.product_overlap_score||0),source_url:result.url,source_query:result.source_query,source_type:analysis.source_type||"other"})}
+        for(const c of analysis.companies){const name=cleanCompanyName(c.name);if(!validCompanyName(name))continue;entities.push({name,official_website:c.official_website||"",related_product:c.related_product||"",relationship_reason:c.relationship_reason||result.description||"",relation_confidence:Number(c.relation_confidence||0),product_overlap_score:Number(c.product_overlap_score||0),source_url:result.url,source_query:result.source_query,source_type:analysis.source_type||"other"})}
       }else if(!articleLike(result)){
-        const provisional=scoreCandidate(`${result.title||""} ${result.description||""}`,workspace,expansion);
-        if(provisional>=10)entities.push({name:cleanCompanyName(result.title||sourceDomain),official_website:originOf(result.url),related_product:String(result.description||"").slice(0,250),relationship_reason:`Official-looking company result matched RADAR search hypothesis: ${result.source_query}`,relation_confidence:60,product_overlap_score:provisional,source_url:result.url,source_query:result.source_query,source_type:"company"});
+        const provisional=scoreCandidate(`${result.title||""} ${result.description||""}`,workspace,expansion);const name=cleanCompanyName(result.title||sourceDomain);
+        if(provisional>=10&&validCompanyName(name))entities.push({name,official_website:originOf(result.url),related_product:String(result.description||"").slice(0,250),relationship_reason:`Official-looking company result matched RADAR search hypothesis: ${result.source_query}`,relation_confidence:60,product_overlap_score:provisional,source_url:result.url,source_query:result.source_query,source_type:"company"});
       }
     }
 
@@ -182,7 +177,10 @@ export async function POST(req:Request){
       const status=officialDomain&&entity.product_overlap_score>=20&&entity.relation_confidence>=60?"promoted":"candidate";
       const existingCandidate:any=candidateMap.get(candidateDomain);
       const candidatePatch={title:entity.name,url:entity.official_website||entity.source_url,domain:candidateDomain,description:entity.relationship_reason,provisional_score:provisional,status,entity_type:"company",related_product:entity.related_product||null,relationship_reason:entity.relationship_reason||null,relation_confidence:entity.relation_confidence,source_page_url:entity.source_url,official_website:entity.official_website||null,product_overlap_score:entity.product_overlap_score,updated_at:new Date().toISOString()};
-      if(!existingCandidate){candidateRows.push({workspace_id:workspace.id,source_query:entity.source_query,...candidatePatch});candidateMap.set(candidateDomain,candidatePatch)}else candidateUpdates.push(sbUpdate("radar_candidates",`id=eq.${existingCandidate.id}`,candidatePatch));
+      if(!existingCandidate){
+        const pending={workspace_id:workspace.id,source_query:entity.source_query,...candidatePatch};candidateRows.push(pending);candidateMap.set(candidateDomain,{__pending:pending});
+      }else if(existingCandidate.id){candidateUpdates.push(sbUpdate("radar_candidates",`id=eq.${existingCandidate.id}`,candidatePatch));}
+      else if(existingCandidate.__pending){Object.assign(existingCandidate.__pending,candidatePatch);}
       if(officialDomain&&(!ownDomain||officialDomain!==ownDomain)&&!sourceLike(officialDomain)&&entity.product_overlap_score>=20&&entity.relation_confidence>=60&&!existingDomains.has(officialDomain)&&!existingNames.has(entity.name.toLowerCase())){
         const similarity=Math.max(provisional,Math.round(entity.product_overlap_score*.82));const threat=Math.min(100,Math.round(similarity*.72+entity.product_overlap_score*.28));
         competitorRows.push({workspace_id:workspace.id,name:entity.name,website:originOf(entity.official_website),description:entity.related_product||entity.relationship_reason,category:categoryFor(similarity),similarity_score:similarity,threat_score:threat,momentum_score:35,movement:"stable",monitoring_preference:"auto",related_product:entity.related_product||null,relationship_reason:entity.relationship_reason||null,relation_confidence:entity.relation_confidence,product_overlap_score:entity.product_overlap_score,discovery_source_url:entity.source_url,why_it_matters:`${entity.related_product?`${entity.name} makes ${entity.related_product}. `:""}${entity.relationship_reason} Product overlap ${entity.product_overlap_score}%; discovery confidence ${entity.relation_confidence}%.`});
@@ -193,7 +191,7 @@ export async function POST(req:Request){
     const insertedCandidates=candidateRows.length?await sbInsert("radar_candidates",candidateRows):[];
     const insertedCompetitors=competitorRows.length?await sbInsert("radar_competitors",competitorRows):[];
     await Promise.allSettled(candidateUpdates);
-    await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:inspected,findings:insertedCompetitors.length,finished_at:new Date().toISOString()});
+    await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:inspected,findings:insertedCompetitors.length,error:null,finished_at:new Date().toISOString()});
     return NextResponse.json({ok:true,search:{firecrawl:firecrawlConfigured(),live_search:engineSearchConfigured()},company_brain_expansion:{used:Boolean(expansion?.search_queries?.length),cached:Boolean(expansion?.cached),provider:expansion?.provider||null,model:expansion?.model||null,queries:Number(expansion?.search_queries?.length||0),error:expansion?.error||null},queries_generated:queries.length,inspected,entities_extracted:shortlisted.length,candidates_found:insertedCandidates.length,promoted:insertedCompetitors.length,competitors:insertedCompetitors,candidates:insertedCandidates.sort((a:any,b:any)=>Number(b.product_overlap_score||0)-Number(a.product_overlap_score||0)).slice(0,75)});
   }catch(error){
     if(run?.id)try{await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"failed",error:error instanceof Error?error.message:"Discovery failed",finished_at:new Date().toISOString()})}catch{}
