@@ -44,19 +44,21 @@ export function StartupProfileForm() {
 
   async function save(e: FormEvent) {
     e.preventDefault();
-    setSaving(true); setMessage("Saving company brain...");
-    const res = await fetch("/api/radar/workspace", { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(form) });
-    setMessage(res.ok ? "Saved. Discovery, scoring and briefings will use this Company Brain." : "Could not save profile.");
+    setSaving(true); setMessage("Saving Company Brain...");
+    const payload={...form,website:String(form.website||"").trim()||null};
+    const res = await fetch("/api/radar/workspace", { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+    const data=await res.json().catch(()=>({}));
+    setMessage(res.ok ? "Saved. Discovery, scoring, monitoring and briefings now use this Company Brain." : data?.error || "Could not save profile.");
     setSaving(false);
   }
 
   if (loading) return <div className="panel founder-panel">Loading startup profile...</div>;
 
   return <form className="panel startup-profile-form" onSubmit={save}>
-    <div className="startup-profile-head"><div><span>COMPANY BRAIN</span><h2>Teach RADAR exactly what your company is trying to win.</h2><p>This profile drives discovery, classification, similarity scoring, monitoring and AI interpretation.</p></div><ShieldCheck size={22}/></div>
+    <div className="startup-profile-head"><div><span>COMPANY BRAIN</span><h2>Teach RADAR exactly what your company is trying to win.</h2><p>This founder-declared profile is RADAR's primary context for discovery, classification, similarity scoring, monitoring and AI interpretation. Your website is optional enrichment.</p></div><ShieldCheck size={22}/></div>
     <div className="startup-form-grid">
       <label><span>Company name</span><input value={form.name || ""} onChange={e=>set("name",e.target.value)} /></label>
-      <label><span>Website</span><input value={form.website || ""} onChange={e=>set("website",e.target.value)} placeholder="https://..." /></label>
+      <label><span>Website <small>(optional)</small></span><input value={form.website || ""} onChange={e=>set("website",e.target.value)} placeholder="Add later if you do not have one yet" /></label>
       <label><span>Industry</span><input value={form.industry || ""} onChange={e=>set("industry",e.target.value)} placeholder="Education, Drone, SaaS..." /></label>
       <label><span>Sub-category</span><input value={form.sub_category || ""} onChange={e=>set("sub_category",e.target.value)} placeholder="Foundational literacy, creator drones..." /></label>
       <label className="wide"><span>One-line description</span><textarea value={form.description || ""} onChange={e=>set("description",e.target.value)} placeholder="What do you build?" /></label>
@@ -71,8 +73,8 @@ export function StartupProfileForm() {
       <label><span>Pricing / price band</span><input value={form.pricing_context || ""} onChange={e=>set("pricing_context",e.target.value)} placeholder="₹499/mo, premium prosumer..." /></label>
       <label><span>Geography</span><input value={form.geography || ""} onChange={e=>set("geography",e.target.value)} placeholder="India, US, global..." /></label>
       <label className="wide"><span>Positioning & messaging</span><textarea value={form.positioning || ""} onChange={e=>set("positioning",e.target.value)} placeholder="How should customers understand you?" /></label>
-      <label className="wide"><span>Relevant public team/company facts</span><textarea value={form.public_team_facts || ""} onChange={e=>set("public_team_facts",e.target.value)} placeholder="Public facts that matter to competitive interpretation." /></label>
+      <label className="wide"><span>Relevant public team/company facts</span><textarea value={form.public_team_facts || ""} onChange={e=>set("public_team_facts",e.target.value)} placeholder="Stage, traction, partnerships, launch status or team strengths that should shape interpretation." /></label>
     </div>
-    <div className="startup-profile-actions"><span>{message || "Keep this precise. Specific context improves discovery quality and reduces noise."}</span><button type="submit" disabled={saving}><Save size={14}/>{saving ? "Saving..." : "Save company brain"}</button></div>
+    <div className="startup-profile-actions"><span>{message || "Specific founder context improves discovery quality and reduces noise. Add a website later whenever one exists."}</span><button type="submit" disabled={saving}><Save size={14}/>{saving ? "Saving..." : "Save company brain"}</button></div>
   </form>;
 }
