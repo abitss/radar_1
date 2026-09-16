@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
-import { createMonitor, searchWeb } from "@/lib/firecrawl";
+import { searchWeb } from "@/lib/firecrawl";
 import { crawlStartupEngine, sourceTypeForUrl } from "@/lib/radar-engine-crawl";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
@@ -63,8 +63,6 @@ export async function POST(req: Request) {
       : [`site:${domain} ${productAnchor} product features capabilities`,`site:${domain} ${productAnchor} pricing plans packaging`,`site:${domain} ${productAnchor} customers use cases`,`site:${domain} ${productAnchor} docs technology integrations`,`site:${domain} ${productAnchor} partnerships launch releases`,`site:${domain} ${founderProducts} ${founderFeatures} ${founderCustomers}`];
     const queries=rawQueries.map(q=>q.replace(/\s+/g," ").trim()).filter(q=>q.length>10).slice(0,quick?3:6);
 
-    // Search is supplemental. The direct first-party crawl above is the primary verification path,
-    // so a provider quota or temporary outage must not invalidate a healthy scan.
     for(const q of queries){
       try{
         const rows=await searchWeb(q,quick?3:4);
@@ -100,10 +98,11 @@ export async function POST(req: Request) {
     const confidence=Math.min(96,limitedPages.length>=8?92:limitedPages.length>=4?84:70);
     const momentumBase=movement==="closer"?65:movement==="away"?25:45;
     const threat=Math.min(100,Math.round(productOverlap*.42+weighted*.34+Math.max(customer,feature,technology)*.14+momentumBase*.10));
-    const category=classify(weighted,productOverlap);
+    const suggestedCategory=classify(weighted,productOverlap);
+    const category=competitor.category_locked?competitor.category:suggestedCategory;
     const matched=[...new Set([...productTerms,...capabilityTerms,...techTerms,...customerTerms,...problemTerms])].filter(term=>corpus.includes(term)).slice(0,24);
     const productLabel=relatedProduct||competitor.name;
-    const why=`${productLabel} has ${productOverlap}% verified product overlap with ${workspace.name}. Overall strategic similarity is ${weighted}% and threat is ${threat}%.${matched.length?` Shared evidence includes ${matched.slice(0,8).join(", ")}.`:""}`;
+    const why=`${productLabel} has ${productOverlap}% verified product overlap with ${workspace.name}. Overall strategic similarity is ${weighted}% and threat is ${threat}%.${matched.length?` Shared evidence includes ${matched.slice(0,8).join(", ")}.`:""}${competitor.category_locked?` Founder category override preserved as ${competitor.category}.`:""}`;
 
     const existingEvidence=await sbSelect(`radar_evidence?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&source_type=eq.first_party_product_scan&select=id,source_url&limit=500`).catch(()=>[]);
     const evidenceUrls=new Set(existingEvidence.map((e:any)=>String(e.source_url||"")));
@@ -146,24 +145,11 @@ export async function POST(req: Request) {
       }
     }
 
-    let monitorActive = false;let monitorError:string|null=null;
     const existingMonitor=await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&status=eq.active&select=id&limit=1`).catch(()=>[]);
-    monitorActive=Boolean(existingMonitor[0]);
-    if(!quick&&!monitorActive&&limitedPages.length){
-      try{
-        const urls=[...new Set(limitedPages.map(p=>p.url).filter((u:string)=>domainOf(u)===domain))].slice(0,10);
-        const secret=process.env.RADAR_API_SECRET||"";
-        const goal=`Watch ${competitor.name}'s ${productLabel} for meaningful changes in product capabilities, pricing, packaging, positioning, target customers, use cases, technology, integrations, distribution, geography, launches, partnerships and customer evidence. Ignore unrelated business lines and cosmetic page edits.`;
-        const created=await createMonitor({name:`RADAR · ${competitor.name} · ${productLabel}`,schedule:{text:"every hour",timezone:"UTC"},targets:[{type:"scrape",urls,scrapeOptions:{}}],goal,judgeEnabled:true,webhook:{url:`${new URL(req.url).origin}/api/radar/firecrawl-webhook`,events:["monitor.page","monitor.check.completed"],headers:secret?{"x-radar-webhook-secret":secret}:undefined}});
-        const providerId=created?.id||created?.data?.id||created?.monitor?.id;
-        await sbInsert("radar_monitors",{workspace_id:workspace.id,competitor_id:competitor.id,provider:"firecrawl",provider_monitor_id:providerId||null,monitor_type:"entity_surveillance",name:`Product surveillance: ${competitor.name} · ${productLabel}`,schedule_text:"every hour",goal,status:"active"});
-        await sbUpdate("radar_competitors",`id=eq.${competitor.id}`,{monitoring_preference:"monitor",updated_at:new Date().toISOString()}).catch(()=>{});
-        monitorActive = true;
-      }catch(error){monitorError=error instanceof Error?error.message:"Monitor activation failed";}
-    }
+    const monitorActive=Boolean(existingMonitor[0]);
 
     await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:limitedPages.length,findings:matched.length,error:null,finished_at:new Date().toISOString()});
-    return NextResponse.json({ok:true,similarity:weighted,product_overlap:productOverlap,threat,movement,category,matched,dimensions:dims,why,pages_scanned:limitedPages.length,strategic_crawl_pages:strategicCrawlPages,monitor_active:monitorActive,monitor_error:monitorError,quick,confidence,evidence_added:evidenceRows.length,material_change:materialChange});
+    return NextResponse.json({ok:true,similarity:weighted,product_overlap:productOverlap,threat,movement,category,suggested_category:suggestedCategory,category_locked:Boolean(competitor.category_locked),matched,dimensions:dims,why,pages_scanned:limitedPages.length,strategic_crawl_pages:strategicCrawlPages,monitor_active:monitorActive,quick,confidence,evidence_added:evidenceRows.length,material_change:materialChange});
   } catch (error) {
     if(run?.id)try{await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"failed",error:error instanceof Error?error.message.slice(0,500):"Scan failed",finished_at:new Date().toISOString()})}catch{}
     if(error instanceof Error&&error.message==="UNAUTHORIZED") return NextResponse.json({error:"Unauthorized"},{status:401});
