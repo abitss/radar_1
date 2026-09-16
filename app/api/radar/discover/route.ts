@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { firecrawlConfigured, searchWebFast } from "@/lib/firecrawl";
+import { engineSearchConfigured } from "@/lib/radar-engine-search";
 import { analyzeDiscoveryResults, radarAIConfigured } from "@/lib/radar-ai";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
@@ -37,7 +38,7 @@ function scoreCandidate(text: string, workspace: any) {
   score += scoreGroup(lower, workspace.business_model, 2);
   return Math.min(100, Math.round(score));
 }
-function categoryFor(score:number){if(score>=75)return"direct";if(score>=50)return"adjacent";if(score>=28)return"micro";return"emerging"}
+function categoryFor(score:number){if(score>=75)return"direct";if(score>=50)return"adjacent";if(score>=28)return"substitute";return"emerging"}
 function buildQueries(workspace:any){
   const product=normalizeTerms(workspace.product_keywords).slice(0,6);
   const features=normalizeTerms(workspace.major_features).slice(0,5);
@@ -97,7 +98,11 @@ async function resolveOfficialWebsite(name:string, relatedProduct:string, suppli
 }
 
 export async function GET(req:Request){
-  try{const {workspace}=await workspaceForRequest(req,true);const candidates=await sbSelect(`radar_candidates?workspace_id=eq.${workspace.id}&select=*&order=product_overlap_score.desc,provisional_score.desc&limit=150`);return NextResponse.json({configured:firecrawlConfigured(),ai:radarAIConfigured(),candidates})}
+  try{
+    const {workspace}=await workspaceForRequest(req,true);
+    const candidates=await sbSelect(`radar_candidates?workspace_id=eq.${workspace.id}&select=*&order=product_overlap_score.desc,provisional_score.desc&limit=150`);
+    return NextResponse.json({configured:firecrawlConfigured()||engineSearchConfigured(),firecrawl:firecrawlConfigured(),live_search:engineSearchConfigured(),ai:radarAIConfigured(),candidates});
+  }
   catch(error){if(error instanceof Error&&error.message==="UNAUTHORIZED")return NextResponse.json({error:"Unauthorized"},{status:401});return NextResponse.json({error:error instanceof Error?error.message:"Could not load discovery"},{status:500})}
 }
 
@@ -106,7 +111,7 @@ export async function POST(req:Request){
   try{
     const {workspace}=await workspaceForRequest(req,true);
     if(!workspace.website)return NextResponse.json({error:"Complete startup setup first. RADAR needs your startup website before it can discover competitors."},{status:400});
-    if(!firecrawlConfigured())return NextResponse.json({error:"FIRECRAWL_API_KEY is not configured."},{status:503});
+    if(!firecrawlConfigured()&&!engineSearchConfigured())return NextResponse.json({error:"No public-web search provider is configured. Add OPENROUTER_API_KEY, FIRECRAWL_API_KEY, TAVILY_API_KEY, BRAVE_SEARCH_API_KEY or SERPER_API_KEY."},{status:503});
     const body=await req.json().catch(()=>({})); const force=Boolean(body?.force);
     const recent=await sbSelect(`radar_scan_runs?workspace_id=eq.${workspace.id}&run_type=eq.market_discovery&status=eq.completed&select=finished_at&order=finished_at.desc&limit=1`);
     if(!force&&recent[0]?.finished_at&&Date.now()-new Date(recent[0].finished_at).getTime()<90*1000)return NextResponse.json({error:"Market discovery was just run. Showing the latest results.",cooldown:true},{status:429});
@@ -131,6 +136,7 @@ export async function POST(req:Request){
     let inspected=0; const raw:any[]=[];
     for(const set of searches){if(set.status!=="fulfilled")continue;inspected+=set.value.results.length;for(const r of set.value.results)raw.push({...r,source_query:set.value.query})}
     const deduped=[...new Map(raw.filter(r=>domainOf(r.url)&&domainOf(r.url)!==ownDomain).map(r=>[r.url,r])).values()].slice(0,80) as any[];
+    if(!deduped.length)throw new Error("Configured search providers returned no public-web results for the current Company Brain.");
 
     let analyzed:any[]=[];
     if(radarAIConfigured()){
@@ -186,7 +192,7 @@ export async function POST(req:Request){
     ]).then((values:any[])=>[values[0]||[],values[1]||[]]);
 
     await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:inspected,findings:insertedCompetitors.length,finished_at:new Date().toISOString()});
-    return NextResponse.json({ok:true,queries_generated:queries.length,inspected,entities_extracted:shortlisted.length,candidates_found:insertedCandidates.length,promoted:insertedCompetitors.length,competitors:insertedCompetitors,candidates:insertedCandidates.sort((a:any,b:any)=>Number(b.product_overlap_score||0)-Number(a.product_overlap_score||0)).slice(0,75)});
+    return NextResponse.json({ok:true,search:{firecrawl:firecrawlConfigured(),live_search:engineSearchConfigured()},queries_generated:queries.length,inspected,entities_extracted:shortlisted.length,candidates_found:insertedCandidates.length,promoted:insertedCompetitors.length,competitors:insertedCompetitors,candidates:insertedCandidates.sort((a:any,b:any)=>Number(b.product_overlap_score||0)-Number(a.product_overlap_score||0)).slice(0,75)});
   }catch(error){
     if(run?.id)try{await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"failed",error:error instanceof Error?error.message:"Discovery failed",finished_at:new Date().toISOString()})}catch{}
     if(error instanceof Error&&error.message==="UNAUTHORIZED")return NextResponse.json({error:"Unauthorized"},{status:401});
