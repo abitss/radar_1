@@ -12,14 +12,44 @@ export async function GET(req: Request, context: { params: Promise<{ id: string 
     const rows = await sbSelect(`radar_competitors?id=eq.${encodeURIComponent(id)}&workspace_id=eq.${workspace.id}&select=*&limit=1`);
     const competitor = rows[0];
     if (!competitor) return NextResponse.json({ error: "Competitor not found" }, { status: 404 });
-    const [dimensions,evidence,signals,recommendations,monitors] = await Promise.all([
+    const [dimensions,evidence,signals,recommendations,monitors,sources,moves,decisions] = await Promise.all([
       sbSelect(`radar_similarity_dimensions?competitor_id=eq.${competitor.id}&select=*&limit=1`),
-      sbSelect(`radar_evidence?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=observed_at.desc&limit=50`),
-      sbSelect(`radar_signals?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=observed_at.desc&limit=30`),
-      sbSelect(`radar_recommendations?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=created_at.desc&limit=20`),
-      sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=created_at.desc&limit=10`),
+      sbSelect(`radar_evidence?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=observed_at.desc&limit=100`),
+      sbSelect(`radar_signals?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=observed_at.desc&limit=60`),
+      sbSelect(`radar_recommendations?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=created_at.desc&limit=40`),
+      sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=created_at.desc&limit=30`),
+      sbSelect(`radar_sources?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=priority.desc,updated_at.desc&limit=100`).catch(()=>[]),
+      sbSelect(`radar_moves?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=*&order=updated_at.desc&limit=30`).catch(()=>[]),
+      sbSelect(`radar_decisions?workspace_id=eq.${workspace.id}&move_id=in.(${encodeURIComponent((await sbSelect(`radar_moves?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=id&limit=30`).catch(()=>[])).map((m:any)=>m.id).join(','))})&select=*&order=updated_at.desc&limit=30`).catch(()=>[]),
     ]);
-    return NextResponse.json({ competitor, dimensions: dimensions[0] || null, evidence, signals, recommendations, monitors });
+    const activeMonitor=monitors.find((m:any)=>m.status==="active")||null;
+    const healthySources=sources.filter((s:any)=>s.status==="active"&&s.health==="healthy").length;
+    const verification_status=competitor.last_scanned_at?"verified":evidence.length?"evidence-backed":"provisional";
+    return NextResponse.json({
+      competitor,
+      dimensions: dimensions[0] || null,
+      evidence,
+      signals,
+      recommendations,
+      monitors,
+      sources,
+      moves,
+      decisions,
+      state:{
+        verification_status,
+        active_monitor:Boolean(activeMonitor),
+        monitor_status:activeMonitor?.status||monitors[0]?.status||null,
+        monitor_last_event_at:activeMonitor?.last_event_at||monitors[0]?.last_event_at||null,
+        monitor_error:activeMonitor?.last_error||monitors[0]?.last_error||null,
+        healthy_sources:healthySources,
+        source_count:sources.length,
+        evidence_count:evidence.length,
+        high_confidence_evidence:evidence.filter((e:any)=>Number(e.confidence||0)>=80).length,
+        open_recommendations:recommendations.filter((r:any)=>r.status==="open").length,
+        active_moves:moves.filter((m:any)=>["watching","confirmed"].includes(String(m.status))).length,
+        open_decisions:decisions.filter((d:any)=>d.status==="open").length,
+      }
+    });
   } catch (error) {
     if (error instanceof Error && error.message === "UNAUTHORIZED") return NextResponse.json({ error:"Unauthorized" },{status:401});
     return NextResponse.json({ error:error instanceof Error?error.message:"Dossier failed" },{status:500});
@@ -71,14 +101,27 @@ export async function DELETE(req:Request,context:{params:Promise<{id:string}>}){
       }
     }
     if(providerFailures.length){
-      return NextResponse.json({error:"RADAR could not safely remove this competitor because at least one provider monitor is still active. Retry after the provider recovers.",details:providerFailures.slice(0,3)},{status:502});
+      return NextResponse.json({error:"RADAR could not safely remove this competitor because at least one provider monitor may still be active. Retry after the provider recovers.",details:providerFailures.slice(0,3)},{status:502});
+    }
+
+    const moveRows=await sbSelect(`radar_moves?workspace_id=eq.${workspace.id}&competitor_id=eq.${id}&select=id&limit=100`).catch(()=>[]);
+    for(const move of moveRows){
+      const decisions=await sbSelect(`radar_decisions?workspace_id=eq.${workspace.id}&move_id=eq.${move.id}&select=id&limit=100`).catch(()=>[]);
+      for(const decision of decisions){
+        await sbDelete("radar_actions",`workspace_id=eq.${workspace.id}&decision_id=eq.${decision.id}`).catch(()=>{});
+        await sbDelete("radar_outcomes",`workspace_id=eq.${workspace.id}&decision_id=eq.${decision.id}`).catch(()=>{});
+      }
+      await sbDelete("radar_decisions",`workspace_id=eq.${workspace.id}&move_id=eq.${move.id}`).catch(()=>{});
+      await sbDelete("radar_move_signals",`move_id=eq.${move.id}`).catch(()=>{});
     }
 
     await Promise.all([
-      sbDelete("radar_similarity_dimensions",`competitor_id=eq.${id}`),
-      sbDelete("radar_recommendations",`workspace_id=eq.${workspace.id}&competitor_id=eq.${id}`),
-      sbDelete("radar_signals",`workspace_id=eq.${workspace.id}&competitor_id=eq.${id}`),
-      sbDelete("radar_evidence",`workspace_id=eq.${workspace.id}&competitor_id=eq.${id}`),
+      sbDelete("radar_sources",`workspace_id=eq.${workspace.id}&competitor_id=eq.${id}`).catch(()=>{}),
+      sbDelete("radar_similarity_dimensions",`competitor_id=eq.${id}`).catch(()=>{}),
+      sbDelete("radar_recommendations",`workspace_id=eq.${workspace.id}&competitor_id=eq.${id}`).catch(()=>{}),
+      sbDelete("radar_signals",`workspace_id=eq.${workspace.id}&competitor_id=eq.${id}`).catch(()=>{}),
+      sbDelete("radar_evidence",`workspace_id=eq.${workspace.id}&competitor_id=eq.${id}`).catch(()=>{}),
+      sbDelete("radar_moves",`workspace_id=eq.${workspace.id}&competitor_id=eq.${id}`).catch(()=>{}),
     ]);
     await sbDelete("radar_competitors",`id=eq.${id}&workspace_id=eq.${workspace.id}`);
     return NextResponse.json({ok:true});
