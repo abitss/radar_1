@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect,useMemo,useState } from "react";
 import { ArrowUpRight,Check,CircleAlert,Clock3,Filter,LoaderCircle,RefreshCcw,Search,Target,X } from "lucide-react";
 import { PageIntro } from "@/components/intelligence-ui";
+import "./decisions.css";
 
 type FilterKey="all"|"open"|"decided"|"dismissed";
 function pct(v:any){return `${Math.round(Number(v||0))}%`}
