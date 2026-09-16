@@ -52,19 +52,17 @@ export async function POST(req:Request){
     stages.push({stage:"market_intelligence",ok:refresh.ok,status:refresh.status,deep_scans:Number(refresh.data?.deep_scans||0),market_events:Number(refresh.data?.market_events||0),signals_created:Number(refresh.data?.signals_created||0),moves_correlated:Number(refresh.data?.moves_correlated||0),error:refresh.ok?null:refresh.data?.error||null});
     if(!refresh.ok)return NextResponse.json({ok:false,workspace_id:workspace.id,stages,duration_ms:Date.now()-started},{status:500});
 
-    let ensured:any={};
-    let monitored:any={};
     try{
-      ensured=await ensureWorkspaceSources(workspace.id);
-      monitored=await runWorkspaceSourceMonitor(workspace.id,8);
+      const ensured:any=await ensureWorkspaceSources(workspace.id);
+      const monitored:any=await runWorkspaceSourceMonitor(workspace.id,8);
       stages.push({stage:"sources",ok:true,sources_added:Number(ensured?.added||0),checked:Number(monitored?.checked||0),changed:Number(monitored?.changed||0),signals:Number(monitored?.signals||0),failed:Number(monitored?.failed||0)});
     }catch(error){
       stages.push({stage:"sources",ok:false,error:error instanceof Error?error.message:"Source monitoring failed"});
       return NextResponse.json({ok:false,workspace_id:workspace.id,stages,duration_ms:Date.now()-started},{status:500});
     }
 
-    const moveResult=await detectMovesForWorkspace(workspace.id).catch((error:any)=>({moves:0,error:error instanceof Error?error.message:String(error)}));
-    const moves:any[]=await sbSelect(`radar_moves?workspace_id=eq.${workspace.id}&select=*&order=impact_score.desc,updated_at.desc&limit=10`);
+    const moveResult:any=await detectMovesForWorkspace(workspace.id).catch((error:any)=>({moves:0,error:error instanceof Error?error.message:String(error)}));
+    const moves:any[]=await sbSelect(`radar_moves?workspace_id=eq.${encodeURIComponent(String(workspace.id))}&select=*&order=impact_score.desc,updated_at.desc&limit=10`);
     stages.push({stage:"moves",ok:!moveResult?.error,correlated:Number(moveResult?.moves||0),available:moves.length,error:moveResult?.error||null});
 
     let decision:any=null;
@@ -77,18 +75,19 @@ export async function POST(req:Request){
       stages.push({stage:"decision",ok:true,skipped:true,reason:runDecision?"No correlated Move exists yet. Decision creation requires evidence-backed Moves.":"Disabled by test request."});
     }
 
-    const [competitors,sources,snapshots,signals,finalMoves,decisions]=await Promise.all([
-      sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&select=id&limit=1000`),
-      sbSelect(`radar_sources?workspace_id=eq.${workspace.id}&select=id&limit=2000`),
-      sbSelect(`radar_sources?workspace_id=eq.${workspace.id}&select=id&limit=2000`).then(async(rows:any[])=>{
+    const workspaceId=encodeURIComponent(String(workspace.id));
+    const [competitors,sources,snapshots,signals,finalMoves,decisions]:any[]=await Promise.all([
+      sbSelect(`radar_competitors?workspace_id=eq.${workspaceId}&select=id&limit=1000`),
+      sbSelect(`radar_sources?workspace_id=eq.${workspaceId}&select=id&limit=2000`),
+      sbSelect(`radar_sources?workspace_id=eq.${workspaceId}&select=id&limit=2000`).then(async(rows:any[])=>{
         if(!rows.length)return[];
-        const ids=rows.map((r:any)=>r.id).filter(Boolean).slice(0,500);
+        const ids:string[]=rows.map((r:any)=>String(r.id||"")).filter(Boolean).slice(0,500);
         if(!ids.length)return[];
         return sbSelect(`radar_snapshots?source_id=in.(${ids.map((id:string)=>encodeURIComponent(id)).join(",")})&select=id&limit=5000`);
       }),
-      sbSelect(`radar_signals?workspace_id=eq.${workspace.id}&select=id&limit=3000`),
-      sbSelect(`radar_moves?workspace_id=eq.${workspace.id}&select=id&limit=1000`),
-      sbSelect(`radar_decisions?workspace_id=eq.${workspace.id}&select=id&limit=1000`),
+      sbSelect(`radar_signals?workspace_id=eq.${workspaceId}&select=id&limit=3000`),
+      sbSelect(`radar_moves?workspace_id=eq.${workspaceId}&select=id&limit=1000`),
+      sbSelect(`radar_decisions?workspace_id=eq.${workspaceId}&select=id&limit=1000`),
     ]);
 
     const summary={competitors:competitors.length,sources:sources.length,snapshots:snapshots.length,signals:signals.length,moves:finalMoves.length,decisions:decisions.length};
