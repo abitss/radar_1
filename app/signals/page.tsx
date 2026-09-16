@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect,useMemo,useState } from "react";
 import { Archive,ArrowUpRight,Check,ChevronDown,ChevronUp,CircleAlert,ExternalLink,Filter,LoaderCircle,RefreshCcw,Search,Target,ThumbsDown,ThumbsUp } from "lucide-react";
 import { PageIntro } from "@/components/intelligence-ui";
+import "./signals.module.css";
 
 type FilterKey="all"|"new"|"reviewed"|"high_impact"|"high_confidence"|"linked_move"|"archived";
 function pct(v:any){return `${Math.round(Number(v||0))}%`}
