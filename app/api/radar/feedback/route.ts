@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { deleteMonitor } from "@/lib/firecrawl";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
@@ -33,8 +34,14 @@ export async function POST(req:Request){
           patch.category="watchlist";
           patch.category_locked=true;
         }
-        const active=await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${targetId}&status=in.(active,pending)&select=id&limit=100`).catch(()=>[]);
-        for(const monitor of active)await sbUpdate("radar_monitors",`id=eq.${monitor.id}`,{status:"paused",updated_at:new Date().toISOString()}).catch(()=>{});
+        const active=await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${targetId}&status=in.(active,pending)&select=id,provider_monitor_id&limit=100`).catch(()=>[]);
+        for(const monitor of active){
+          let providerStopped=false;
+          if(monitor.provider_monitor_id){
+            try{await deleteMonitor(String(monitor.provider_monitor_id));providerStopped=true}catch{}
+          }
+          await sbUpdate("radar_monitors",`id=eq.${monitor.id}`,{status:providerStopped||!monitor.provider_monitor_id?"deleted":"error",last_error:providerStopped||!monitor.provider_monitor_id?null:"Provider watch could not be deleted during founder ignore action.",updated_at:new Date().toISOString()}).catch(()=>{});
+        }
       }
       if(feedbackType==="reclassify"&&body.category){
         const category=String(body.category);
