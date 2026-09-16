@@ -41,6 +41,7 @@ function scoreCandidate(text:string,workspace:any,expansion:any){
   return Math.min(100,Math.round(score));
 }
 function categoryFor(score:number){if(score>=75)return"direct";if(score>=50)return"adjacent";if(score>=28)return"substitute";return"emerging"}
+function sleep(ms:number){return new Promise(resolve=>setTimeout(resolve,ms))}
 
 function baseQueries(workspace:any){
   const product=terms(workspace.product_keywords).slice(0,6);
@@ -101,10 +102,26 @@ export async function POST(req:Request){
     const readiness=companyBrainReadiness(workspace);
     if(!readiness.ready)return NextResponse.json({error:`Complete the Company Brain first. Missing: ${readiness.missing.join(", ")}.`,company_brain:readiness},{status:400});
     if(!firecrawlConfigured()&&!engineSearchConfigured())return NextResponse.json({error:"No public-web search provider is configured."},{status:503});
-    const body=await req.json().catch(()=>({}));const force=Boolean(body?.force);
+    const body=await req.json().catch(()=>({}));
+
+    // Discovery is intentionally single-flight per workspace. Several RADAR surfaces can
+    // request discovery at nearly the same time, so force=true must not create parallel runs.
+    const activeCutoff=new Date(Date.now()-10*60*1000).toISOString();
+    const active=await sbSelect(`radar_scan_runs?workspace_id=eq.${workspace.id}&run_type=eq.market_discovery&status=eq.running&started_at=gte.${encodeURIComponent(activeCutoff)}&select=id,started_at&order=started_at.asc&limit=1`);
+    if(active[0])return NextResponse.json({error:"Market discovery is already running for this workspace.",cooldown:true,running:true,run_id:active[0].id},{status:429});
+
     const recent=await sbSelect(`radar_scan_runs?workspace_id=eq.${workspace.id}&run_type=eq.market_discovery&status=eq.completed&select=finished_at&order=finished_at.desc&limit=1`);
-    if(!force&&recent[0]?.finished_at&&Date.now()-new Date(recent[0].finished_at).getTime()<90*1000)return NextResponse.json({error:"Market discovery was just run. Showing the latest results.",cooldown:true},{status:429});
+    if(recent[0]?.finished_at&&Date.now()-new Date(recent[0].finished_at).getTime()<90*1000)return NextResponse.json({error:"Market discovery was just run. Showing the latest results.",cooldown:true},{status:429});
+
     run=(await sbInsert("radar_scan_runs",{workspace_id:workspace.id,run_type:"market_discovery",status:"running"}))[0];
+
+    // Close the tiny race where two requests both pass the pre-insert check.
+    await sleep(180);
+    const contenders=await sbSelect(`radar_scan_runs?workspace_id=eq.${workspace.id}&run_type=eq.market_discovery&status=eq.running&started_at=gte.${encodeURIComponent(activeCutoff)}&select=id,started_at&order=started_at.asc&limit=3`);
+    if(contenders[0]?.id&&contenders[0].id!==run?.id){
+      await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:0,findings:0,finished_at:new Date().toISOString()}).catch(()=>{});
+      return NextResponse.json({error:"A discovery run already won the workspace lock.",cooldown:true,running:true,run_id:contenders[0].id},{status:429});
+    }
 
     let expansion:any=null;
     try{expansion=await ensureCompanyBrainExpansion(workspace,{force:Boolean(body?.refreshBrainExpansion)});}catch(error){expansion={search_queries:[],error:error instanceof Error?error.message:"AI Company Brain expansion failed"}}
@@ -129,7 +146,16 @@ export async function POST(req:Request){
     let inspected=0;const raw:any[]=[];
     for(const set of searches){if(set.status!=="fulfilled")continue;inspected+=set.value.results.length;for(const r of set.value.results)raw.push({...r,source_query:set.value.query})}
     const deduped=[...new Map(raw.filter(r=>domainOf(r.url)&&(!ownDomain||domainOf(r.url)!==ownDomain)).map(r=>[r.url,r])).values()].slice(0,140) as any[];
-    if(!deduped.length)throw new Error("Configured search providers returned no public-web results for the current Company Brain.");
+
+    // A transient empty provider response must not turn an already-populated workspace into
+    // a failed workspace. Keep the existing intelligence and report a degraded successful run.
+    if(!deduped.length){
+      if(existingCandidates.length||existingCompetitors.length){
+        await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:0,findings:0,finished_at:new Date().toISOString()});
+        return NextResponse.json({ok:true,degraded:true,error:"Search providers returned no new public-web results; existing intelligence was preserved.",search:{firecrawl:firecrawlConfigured(),live_search:engineSearchConfigured()},queries_generated:queries.length,inspected:0,candidates_found:0,promoted:0,existing_candidates:existingCandidates.length,existing_competitors:existingCompetitors.length});
+      }
+      throw new Error("Configured search providers returned no public-web results for the current Company Brain.");
+    }
 
     let analyzed:any[]=[];
     if(radarAIConfigured())for(let i=0;i<deduped.length;i+=20){try{const batch=await analyzeDiscoveryResults(workspace,deduped.slice(i,i+20));if(batch)analyzed.push(...batch)}catch{}}
