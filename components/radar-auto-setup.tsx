@@ -26,7 +26,7 @@ export function RadarAutoSetup({disabled=false}:{disabled?:boolean}){
         const workspaceResult=await json("/api/radar/workspace");
         if(!workspaceResult.res.ok)return;
         const workspace=workspaceResult.data;
-        if(!workspace?.website)return;
+        if(!workspace?.onboarding_completed||workspace?.company_brain?.ready===false)return;
 
         const params=new URLSearchParams(window.location.search);
         const explicit=params.get("initialize")==="1";
@@ -34,7 +34,7 @@ export function RadarAutoSetup({disabled=false}:{disabled?:boolean}){
         const needsInitial=workspace.initial_scan_status!=="completed"||Boolean(activeJob);
 
         if(needsInitial){
-          if(alive){setStatus("working");const step=activeJob?.current_step&&activeJob.current_step!=="queued"?` Current step: ${activeJob.current_step}.`:"";setMessage(`RADAR is creating this workspace's complete intelligence universe automatically.${step}`);}
+          if(alive){setStatus("working");const step=activeJob?.current_step&&activeJob.current_step!=="queued"?` Current step: ${activeJob.current_step}.`:"";setMessage(`RADAR is building a personalized intelligence universe from your Company Brain.${step}`);}
           const init=await json("/api/radar/initialize",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({resume:true})});
           if(!init.res.ok)throw new Error(init.data?.error||"Automatic intelligence initialization failed");
           await json("/api/radar/continuous",{method:"POST"}).catch(()=>null);
@@ -47,11 +47,11 @@ export function RadarAutoSetup({disabled=false}:{disabled?:boolean}){
         const overview=await json("/api/radar/overview");
         if(!overview.res.ok)return;
         const monitor=await json("/api/radar/continuous",{method:"POST"});
-        if(!monitor.res.ok)throw new Error(monitor.data?.error||"Continuous monitoring could not start");
-        if(!overview.data?.monitor&&alive){setStatus("done");setMessage("Continuous market surveillance restored.");await sleep(2500);if(alive)setStatus("idle")}
+        if(!monitor.res.ok&&monitor.res.status!==503)throw new Error(monitor.data?.error||"Continuous monitoring could not start");
+        if(!overview.data?.monitor&&monitor.res.ok&&alive){setStatus("done");setMessage("Continuous market surveillance restored.");await sleep(2500);if(alive)setStatus("idle")}
 
         if(Number(overview.data?.metrics?.competitors||0)===0){
-          if(alive){setStatus("working");setMessage("No verified competitors yet. RADAR is running a fresh discovery sweep for this workspace...")}
+          if(alive){setStatus("working");setMessage("No verified competitors yet. RADAR is running a fresh discovery sweep from your Company Brain...")}
           const discover=await json("/api/radar/discover",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({force:true})});
           if(!discover.res.ok&&!discover.data?.cooldown)throw new Error(discover.data?.error||"Market discovery failed");
           if(alive){setStatus("done");setMessage("Fresh discovery completed. RADAR will continue expanding this workspace automatically.");await sleep(4500);if(alive)setStatus("idle")}
