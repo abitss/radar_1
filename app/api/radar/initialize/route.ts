@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { sbSelect, sbUpdate } from "@/lib/radar-db";
 import { runCompetitiveLandscape } from "@/lib/radar-engine-landscape";
+import { ensureCompanyBrainExpansion } from "@/lib/radar-brain-expansion";
 import { companyBrainReadiness } from "@/lib/radar-profile";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
@@ -29,43 +30,49 @@ export async function POST(req:Request){
     const steps:any[]=[];
     const progress=async(step:string,value:number)=>{if(job?.id){const rows=await sbUpdate("radar_jobs",`id=eq.${job.id}`,{current_step:step,progress:value,updated_at:new Date().toISOString()});job=rows[0]||job}};
 
-    await progress("company_brain",10);
+    await progress("company_brain",8);
     if(workspace.website){
       const boot=await callInternal(req,"/api/radar/bootstrap",{website:workspace.website});
-      steps.push({step:"company_brain",ok:boot.res.ok,error:boot.data?.error||null,engine:boot.data?.engine||null,input:"founder_form+website"});
-      if(!boot.res.ok)steps.push({step:"website_enrichment",ok:false,error:boot.data?.error||"Website enrichment failed; continuing from founder Company Brain."});
-    }else{
-      steps.push({step:"company_brain",ok:true,input:"founder_form",website_optional:true});
+      steps.push({step:"company_brain",ok:true,input:"founder_form",website_enrichment:boot.res.ok,error:boot.res.ok?null:boot.data?.error||null});
+    }else steps.push({step:"company_brain",ok:true,input:"founder_form",website_optional:true});
+
+    await progress("brain_expansion",18);
+    let expansion:any=null;
+    try{
+      expansion=await ensureCompanyBrainExpansion(workspace);
+      steps.push({step:"brain_expansion",ok:true,cached:Boolean(expansion.cached),queries:expansion.search_queries.length,adjacent_categories:expansion.adjacent_categories.length,substitute_workflows:expansion.substitute_workflows.length,hidden_angles:expansion.hidden_competitor_angles.length,provider:expansion.provider||null,model:expansion.model||null});
+    }catch(error){
+      steps.push({step:"brain_expansion",ok:false,error:error instanceof Error?error.message:"AI Company Brain expansion failed",continued:true});
     }
 
-    await progress("market_discovery",26);
+    await progress("market_discovery",30);
     const discover=await callInternal(req,"/api/radar/discover",{force:true});
-    steps.push({step:"discovery",ok:discover.res.ok||Boolean(discover.data?.cooldown),error:discover.data?.error||null,inspected:discover.data?.inspected||0,promoted:discover.data?.promoted||0});
+    steps.push({step:"discovery",ok:discover.res.ok||Boolean(discover.data?.cooldown),error:discover.data?.error||null,inspected:discover.data?.inspected||0,promoted:discover.data?.promoted||0,ai_expansion:discover.data?.company_brain_expansion||null});
     if(!discover.res.ok&&!discover.data?.cooldown)throw new Error(discover.data?.error||"Competitor discovery failed");
 
-    await progress("landscape_reasoning",38);
+    await progress("landscape_reasoning",42);
     let landscape:any=null;
     try{landscape=await runCompetitiveLandscape(workspace.id);steps.push({step:"landscape_reasoning",ok:true,...landscape})}
     catch(error){steps.push({step:"landscape_reasoning",ok:false,error:error instanceof Error?error.message:"Landscape analysis failed"})}
 
-    await progress("competitor_verification",50);
+    await progress("competitor_verification",54);
     const competitors=await sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&select=*&order=product_overlap_score.desc,threat_score.desc,similarity_score.desc&limit=12`);
     const scanTargets=competitors.filter((c:any)=>c.website).slice(0,8);
     const scanResults=await Promise.allSettled(scanTargets.map((c:any)=>callInternal(req,"/api/radar/scan",{competitorId:c.id,quick:true})));
     const scanned=scanResults.filter((r:any)=>r.status==="fulfilled"&&(r.value.res.ok||r.value.data?.cooldown)).length;
     steps.push({step:"deep_scan",ok:true,requested:scanTargets.length,completed:scanned});
 
-    await progress("competitor_monitoring",69);
+    await progress("competitor_monitoring",70);
     const monitorTargets=(await sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&select=*&order=threat_score.desc,product_overlap_score.desc&limit=5`)).filter((c:any)=>c.website);
     const monitorResults=await Promise.allSettled(monitorTargets.map((c:any)=>callInternal(req,`/api/radar/competitors/${c.id}/monitor`)));
     const monitors=monitorResults.filter((r:any)=>r.status==="fulfilled"&&r.value.res.ok).length;
     steps.push({step:"competitor_monitoring",ok:true,requested:monitorTargets.length,activated:monitors});
 
-    await progress("continuous_discovery",82);
+    await progress("continuous_discovery",84);
     const continuous=await callInternal(req,"/api/radar/continuous");
     steps.push({step:"continuous_discovery",ok:continuous.res.ok,error:continuous.data?.error||null});
 
-    await progress("founder_briefing",92);
+    await progress("founder_briefing",94);
     const briefing=await callInternal(req,"/api/radar/briefings",{period:"weekly"});
     steps.push({step:"founder_briefing",ok:briefing.res.ok,error:briefing.data?.error||null});
 
@@ -75,7 +82,7 @@ export async function POST(req:Request){
       sbSelect(`radar_signals?workspace_id=eq.${workspace.id}&select=id&limit=1000`),
       sbSelect(`radar_recommendations?workspace_id=eq.${workspace.id}&select=id&limit=1000`)
     ]);
-    const result={input:"company_brain",website_enrichment:Boolean(workspace.website),competitors:finalCompetitors.length,evidence:evidence.length,signals:signals.length,recommendations:recommendations.length,landscape};
+    const result={input:"company_brain",ai_expansion_queries:Number(expansion?.search_queries?.length||0),website_enrichment:Boolean(workspace.website),competitors:finalCompetitors.length,evidence:evidence.length,signals:signals.length,recommendations:recommendations.length,landscape};
     await sbUpdate("radar_workspaces",`id=eq.${workspace.id}`,{initial_scan_status:"completed",initial_scan_completed_at:new Date().toISOString(),initial_scan_error:null,updated_at:new Date().toISOString()});
     if(job?.id)await sbUpdate("radar_jobs",`id=eq.${job.id}`,{status:"completed",current_step:"completed",progress:100,result,completed_at:new Date().toISOString(),updated_at:new Date().toISOString(),error:null});
     return NextResponse.json({ok:true,steps,output:result});
