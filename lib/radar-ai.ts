@@ -1,4 +1,4 @@
-import { radarEngineAIConfigured, radarEngineJson, radarEngineText } from "@/lib/radar-engine-ai";
+import { radarEngineAIConfigured, radarEngineAIStatus, radarEngineJson, radarEngineText } from "@/lib/radar-engine-ai";
 
 type RadarAIInput = {
   question: string;
@@ -7,6 +7,8 @@ type RadarAIInput = {
   signals: any[];
   recommendations: any[];
   evidence: any[];
+  feature?: string;
+  liveWeb?: boolean;
 };
 
 export type DiscoveryCompany = {
@@ -29,11 +31,7 @@ export function radarAIConfigured() {
 }
 
 export function radarAIProvider() {
-  const requested=String(process.env.RADAR_AI_PROVIDER||process.env.AI_PROVIDER||"").toLowerCase();
-  const preferGemini=Boolean(process.env.GEMINI_API_KEY)&&String(process.env.RADAR_PREFER_GEMINI||"").toLowerCase()==="true";
-  const provider=requested|| (preferGemini?"gemini":(process.env.RADAR_AI_BASE_URL||"").includes("groq.com")||process.env.GROQ_API_KEY?"groq":"compatible");
-  const model=process.env.RADAR_AI_MODEL_REASONING||process.env.AI_MODEL_REASONING||process.env.RADAR_AI_MODEL||process.env.AI_MODEL||(provider==="gemini"?"gemini-2.5-flash":"openai/gpt-oss-20b");
-  return {provider,model,configured:radarAIConfigured()};
+  return radarEngineAIStatus();
 }
 
 function compact(value: unknown, max = 8500) {
@@ -93,11 +91,11 @@ export async function generateRadarAnswer(input: RadarAIInput): Promise<string |
       category: c.category, similarity_score: c.similarity_score, threat_score: c.threat_score,
       momentum_score: c.momentum_score, movement: c.movement, why_it_matters: c.why_it_matters, last_scanned_at: c.last_scanned_at,
     })),
-    signals: input.signals.slice(0, 12).map(s => ({title:s.title,summary:s.summary,signal_type:s.signal_type,impact_score:s.impact_score,confidence:s.confidence,observed_at:s.observed_at})),
-    recommendations: input.recommendations.slice(0, 12).map(r => ({title:r.title,priority:r.priority,rationale:r.rationale,action:r.action,status:r.status,created_at:r.created_at})),
-    evidence: input.evidence.slice(0, 24).map(e => ({title:e.title,source_url:e.source_url,fact:e.fact,confidence:e.confidence,observed_at:e.observed_at})),
+    signals: input.signals.slice(0, 18).map(s => ({title:s.title,summary:s.summary,signal_type:s.signal_type,impact_score:s.impact_score,confidence:s.confidence,observed_at:s.observed_at})),
+    recommendations: input.recommendations.slice(0, 16).map(r => ({title:r.title,priority:r.priority,rationale:r.rationale,action:r.action,status:r.status,created_at:r.created_at})),
+    evidence: input.evidence.slice(0, 36).map(e => ({title:e.title,source_url:e.source_url,fact:e.fact,confidence:e.confidence,observed_at:e.observed_at})),
   };
-  const prompt=`You are RADAR, a founder competitive-intelligence analyst. Use ONLY the supplied workspace data, competitors, signals, recommendations and public evidence. Never invent a competitor fact, funding event, launch, customer, metric or market claim. When useful, explicitly separate FACT, INFERENCE and PREDICTION. If evidence is insufficient, say so clearly instead of guessing. Prefer concise, decision-oriented answers. Explain why something matters to the founder. Do not claim whole-internet coverage. Say public/indexable sources or RADAR's current evidence. Never expose internal IDs, secrets, implementation details, API keys or raw database metadata.\n\nFounder question:\n${input.question}\n\nRADAR evidence context:\n${compact(context)}`;
-  const result=await radarEngineText(prompt,{feature:"ask_radar",maxTokens:900,temperature:.1});
+  const prompt=`You are RADAR, a founder competitive-intelligence analyst. Use the supplied workspace evidence as the trusted internal context. When live-web access is enabled, use it only to find current public information and clearly distinguish newly found web facts from stored RADAR evidence. Never invent a competitor fact, funding event, launch, customer, metric or market claim. Explicitly separate VERIFIED FACT, INFERENCE and PREDICTION when useful. Prefer concise, decision-oriented answers that explain why something matters to this founder. Never claim complete internet coverage; describe coverage as current public/indexable sources. Never expose internal IDs, secrets, API keys or raw database metadata.\n\nFounder question:\n${input.question}\n\nRADAR evidence context:\n${compact(context,18000)}`;
+  const result=await radarEngineText(prompt,{feature:input.feature||"ask_radar",web:input.liveWeb??true,maxTokens:1200,temperature:.08});
   return result.text?.trim()||null;
 }
