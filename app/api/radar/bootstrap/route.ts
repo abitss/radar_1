@@ -15,6 +15,8 @@ function normalizeUrl(raw:string){
 }
 
 function stringList(value:any,limit:number){return Array.isArray(value)?value.map(String).map(x=>x.trim()).filter(Boolean).slice(0,limit):[]}
+function keepText(incoming:any,current:any){const value=String(incoming??"").trim();return value||String(current??"").trim()}
+function keepList(incoming:any,current:any,limit:number){const next=stringList(incoming,limit);return next.length?next:stringList(current,limit)}
 
 export async function POST(req:Request){
   try{
@@ -38,25 +40,28 @@ export async function POST(req:Request){
       profile=scraped?.json||scraped?.data?.json||{};
     }
 
-    const name=String(profile.company_name||new URL(website).hostname.replace(/^www\./,"").split(".")[0]||"My startup");
+    // Website enrichment must be additive. Never erase founder-provided Company Brain
+    // fields when a crawl/provider returns an empty or incomplete profile.
+    const extractedName=String(profile.company_name||"").trim();
+    const name=extractedName||String(workspace.name||"").trim()||new URL(website).hostname.replace(/^www\./,"").split(".")[0]||"My startup";
     const updated=await sbUpdate("radar_workspaces",`id=eq.${workspace.id}`,{
       name,
       website,
-      description:profile.one_line_description||"",
-      industry:profile.industry||"",
-      sub_category:profile.sub_category||"",
-      problem_statement:profile.problem_statement||"",
-      target_customers:profile.target_customers||"",
-      buyer:profile.buyer||"",
-      product_keywords:stringList(profile.product_keywords,16),
-      capability_keywords:stringList(profile.capability_keywords,20),
-      technology_keywords:stringList(profile.technology_keywords,16),
-      major_features:stringList(profile.major_features,20),
-      geography:profile.geography||"",
-      business_model:profile.business_model||"",
-      pricing_context:profile.pricing_context||"",
-      positioning:profile.positioning||"",
-      public_team_facts:profile.public_team_facts||"",
+      description:keepText(profile.one_line_description,workspace.description),
+      industry:keepText(profile.industry,workspace.industry),
+      sub_category:keepText(profile.sub_category,workspace.sub_category),
+      problem_statement:keepText(profile.problem_statement,workspace.problem_statement),
+      target_customers:keepText(profile.target_customers,workspace.target_customers),
+      buyer:keepText(profile.buyer,workspace.buyer),
+      product_keywords:keepList(profile.product_keywords,workspace.product_keywords,16),
+      capability_keywords:keepList(profile.capability_keywords,workspace.capability_keywords,20),
+      technology_keywords:keepList(profile.technology_keywords,workspace.technology_keywords,16),
+      major_features:keepList(profile.major_features,workspace.major_features,20),
+      geography:keepText(profile.geography,workspace.geography),
+      business_model:keepText(profile.business_model,workspace.business_model),
+      pricing_context:keepText(profile.pricing_context,workspace.pricing_context),
+      positioning:keepText(profile.positioning,workspace.positioning),
+      public_team_facts:keepText(profile.public_team_facts,workspace.public_team_facts),
       updated_at:new Date().toISOString(),
     });
 
