@@ -26,8 +26,10 @@ export async function GET(req: Request) {
     const movingCloser = competitors.filter((c:any)=>c.movement==="closer");
     const core = competitors.filter((c:any)=>Number(c.similarity_score||0)>=80);
     const openRecommendations = recommendations.filter((r:any)=>r.status==="open");
-    const monitor = monitors.find((m:any)=>m.monitor_type==="web_discovery"&&m.status==="active") || null;
-    const activeCompetitorMonitors = monitors.filter((m:any)=>m.competitor_id&&m.status==="active");
+    const activeMonitors = monitors.filter((m:any)=>m.status==="active");
+    const discoveryMonitors = activeMonitors.filter((m:any)=>m.monitor_type==="web_discovery");
+    const monitor = discoveryMonitors[0] || null;
+    const activeCompetitorMonitors = activeMonitors.filter((m:any)=>m.competitor_id);
     const monitoredIds = new Set(activeCompetitorMonitors.map((m:any)=>m.competitor_id));
     const approved = competitors.filter((c:any)=>c.monitoring_preference==="monitor" || monitoredIds.has(c.id));
     const highConfidenceEvidence = evidence.filter((e:any)=>Number(e.confidence||0)>=80).length;
@@ -39,7 +41,8 @@ export async function GET(req: Request) {
       live:{
         mode:"event-driven-near-real-time",
         lastMonitorEvent,
-        activeDiscoveryMonitors:monitors.filter((m:any)=>m.monitor_type==="web_discovery"&&m.status==="active").length,
+        activeMonitors:activeMonitors.length,
+        activeDiscoveryMonitors:discoveryMonitors.length,
         activeCompetitorMonitors:activeCompetitorMonitors.length,
         eventsLastHour:liveEvents.length,
         critical:criticalEvents.length,
