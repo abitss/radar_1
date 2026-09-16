@@ -53,7 +53,12 @@ export async function POST(req:Request){
     }
 
     if(targetType==="signal"&&targetId&&["useful","not_useful","too_noisy","wrong_interpretation","wrong_fact"].includes(feedbackType)){
-      await sbUpdate("radar_signals",`id=eq.${targetId}`,{user_feedback:feedbackType});
+      await sbUpdate("radar_signals",`id=eq.${targetId}&workspace_id=eq.${workspace.id}`,{
+        user_feedback:feedbackType,
+        status:"reviewed",
+        reviewed_at:new Date().toISOString(),
+        updated_at:new Date().toISOString(),
+      });
     }
 
     return NextResponse.json({ok:true,feedback:inserted[0]||null});
