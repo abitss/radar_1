@@ -3,6 +3,7 @@ import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
 const allowed=new Set(["useful","not_useful","not_competitor","reclassify","monitor","ignore","more_like_this","too_noisy","wrong_interpretation","wrong_fact"]);
+const categories=new Set(["direct","adjacent","substitute","emerging","incumbent","watchlist"]);
 
 export async function POST(req:Request){
   try{
@@ -26,9 +27,22 @@ export async function POST(req:Request){
       const patch:any={updated_at:new Date().toISOString()};
       if(["useful","not_useful","not_competitor","more_like_this","ignore"].includes(feedbackType))patch.user_feedback=feedbackType;
       if(feedbackType==="monitor")patch.monitoring_preference="monitor";
-      if(feedbackType==="ignore"||feedbackType==="not_competitor")patch.monitoring_preference="ignore";
-      if(feedbackType==="reclassify"&&body.category)patch.category=String(body.category);
-      await sbUpdate("radar_competitors",`id=eq.${targetId}`,patch);
+      if(feedbackType==="ignore"||feedbackType==="not_competitor"){
+        patch.monitoring_preference="ignore";
+        if(feedbackType==="not_competitor"){
+          patch.category="watchlist";
+          patch.category_locked=true;
+        }
+        const active=await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${targetId}&status=in.(active,pending)&select=id&limit=100`).catch(()=>[]);
+        for(const monitor of active)await sbUpdate("radar_monitors",`id=eq.${monitor.id}`,{status:"paused",updated_at:new Date().toISOString()}).catch(()=>{});
+      }
+      if(feedbackType==="reclassify"&&body.category){
+        const category=String(body.category);
+        if(!categories.has(category))return NextResponse.json({error:"Invalid category"},{status:400});
+        patch.category=category;
+        patch.category_locked=true;
+      }
+      await sbUpdate("radar_competitors",`id=eq.${targetId}&workspace_id=eq.${workspace.id}`,patch);
     }
 
     if(targetType==="signal"&&targetId&&["useful","not_useful","too_noisy","wrong_interpretation","wrong_fact"].includes(feedbackType)){
