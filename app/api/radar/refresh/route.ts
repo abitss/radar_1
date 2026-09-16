@@ -10,22 +10,48 @@ import { workspaceForRequest } from "@/lib/radar-workspace";
 function clean(text:any){return String(text||"").toLowerCase().replace(/[^a-z0-9\s]/g," ").replace(/\s+/g," ").trim()}
 function overlap(a:any,b:any){const A=new Set(clean(a).split(" ").filter(x=>x.length>3)),B=new Set(clean(b).split(" ").filter(x=>x.length>3));if(!A.size||!B.size)return 0;let both=0;for(const x of A)if(B.has(x))both++;return both/Math.max(1,Math.min(A.size,B.size))}
 function eventQuery(c:any){const product=String(c.related_product||c.description||c.name).slice(0,120);const qs=[`"${c.name}" ${product} launch pricing features`,`"${c.name}" funding partnership hiring technology`];try{if(c.website)qs.push(`site:${new URL(c.website).hostname} ${product} pricing product news`)}catch{}return qs}
+function recentEnough(raw:any,hours:number){if(!raw)return false;const t=new Date(raw).getTime();return Number.isFinite(t)&&Date.now()-t<hours*60*60*1000}
 async function internal(req:Request,path:string,body?:any){const base=process.env.PORT?`http://127.0.0.1:${process.env.PORT}`:req.url;const url=new URL(path,base);const headers:any={"Content-Type":"application/json"};const cookie=req.headers.get("cookie");if(cookie)headers.cookie=cookie;const systemWorkspace=req.headers.get("x-radar-system-workspace");if(systemWorkspace)headers["x-radar-system-workspace"]=systemWorkspace;const apiKey=req.headers.get("x-radar-api-key");if(apiKey)headers["x-radar-api-key"]=apiKey;const res=await fetch(url,{method:"POST",headers,body:body===undefined?undefined:JSON.stringify(body),cache:"no-store"});const data=await res.json().catch(()=>({}));return{res,data}}
 
 export async function POST(req:Request){
+  let run:any=null;
   try{
     const {workspace}=await workspaceForRequest(req,true);const readiness=companyBrainReadiness(workspace);if(!readiness.ready)return NextResponse.json({error:`Company Brain is incomplete. Missing: ${readiness.missing.join(", ")}.`,company_brain:readiness},{status:400});
-    const run=(await sbInsert("radar_scan_runs",{workspace_id:workspace.id,run_type:"workspace_refresh",status:"running"}))[0];
-    const result:any={input:"company_brain",website_enrichment:Boolean(workspace.website),discovery:null,landscape:null,deep_scans:0,market_events:0,signals_created:0,recommendations_created:0,evidence_created:0,moves_correlated:0};
+
+    const activeCutoff=new Date(Date.now()-15*60*1000).toISOString();
+    const active=await sbSelect(`radar_scan_runs?workspace_id=eq.${workspace.id}&run_type=eq.workspace_refresh&status=eq.running&started_at=gte.${encodeURIComponent(activeCutoff)}&select=id,started_at&order=started_at.asc&limit=1`).catch(()=>[]);
+    if(active[0])return NextResponse.json({ok:true,cooldown:true,running:true,run_id:active[0].id,message:"A workspace refresh is already running."});
+
+    run=(await sbInsert("radar_scan_runs",{workspace_id:workspace.id,run_type:"workspace_refresh",status:"running"}))[0];
+    const result:any={input:"company_brain",website_enrichment:Boolean(workspace.website),discovery:null,landscape:null,deep_scans:0,deep_scan_degraded:0,deep_scan_skipped_recent:0,market_events:0,signals_created:0,recommendations_created:0,evidence_created:0,moves_correlated:0};
     try{
       const discover=await internal(req,"/api/radar/discover",{force:true});result.discovery={ok:discover.res.ok||Boolean(discover.data?.cooldown),inspected:discover.data?.inspected||0,promoted:discover.data?.promoted||0,entities:discover.data?.entities_extracted||0,error:discover.res.ok?null:discover.data?.error||null};
+
       try{result.landscape=await runCompetitiveLandscape(workspace.id)}catch(error){result.landscape={error:error instanceof Error?error.message:"Landscape analysis failed"}}
-      const competitors=await sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&select=*&order=threat_score.desc,product_overlap_score.desc,similarity_score.desc&limit=24`);const scanTargets=competitors.filter((c:any)=>c.website).slice(0,10);const scanResults=await Promise.allSettled(scanTargets.map((c:any)=>internal(req,"/api/radar/scan",{competitorId:c.id,quick:true})));result.deep_scans=scanResults.filter((x:any)=>x.status==="fulfilled"&&(x.value.res.ok||x.value.data?.cooldown)).length;
+
+      const competitors=await sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&select=*&order=threat_score.desc,product_overlap_score.desc,similarity_score.desc&limit=24`);
+      const scanTargets=competitors.filter((c:any)=>c.website&&!recentEnough(c.last_scanned_at,6)).slice(0,4);
+      result.deep_scan_skipped_recent=competitors.filter((c:any)=>c.website&&recentEnough(c.last_scanned_at,6)).length;
+
+      // Run quick verification sequentially. The previous fan-out of up to 10 scans could exhaust
+      // external search quotas in a few seconds and leave otherwise healthy RADAR refreshes failed.
+      for(const c of scanTargets){
+        try{
+          const scan=await internal(req,"/api/radar/scan",{competitorId:c.id,quick:true});
+          if(scan.res.ok||scan.data?.cooldown)result.deep_scans++;
+          if(scan.data?.degraded)result.deep_scan_degraded++;
+        }catch{}
+      }
+
       const refreshedCompetitors=await sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&select=*&order=threat_score.desc,product_overlap_score.desc&limit=20`);const recentSignals=await sbSelect(`radar_signals?workspace_id=eq.${workspace.id}&select=*&order=observed_at.desc&limit=80`);
-      const evidenceSearches=await Promise.allSettled(refreshedCompetitors.slice(0,12).flatMap((c:any)=>eventQuery(c).map(q=>engineSearchWeb(q,5))));const map=new Map<string,any>();for(const set of evidenceSearches){if(set.status!=="fulfilled")continue;for(const r of set.value){if(r?.url&&!map.has(r.url))map.set(r.url,r)}}const webEvidence=[...map.values()].slice(0,100);
+
+      const researchTargets=refreshedCompetitors.slice(0,8);
+      const evidenceSearches=await Promise.allSettled(researchTargets.flatMap((c:any)=>eventQuery(c).slice(0,2).map(q=>engineSearchWeb(q,4))));const map=new Map<string,any>();for(const set of evidenceSearches){if(set.status!=="fulfilled")continue;for(const r of set.value){if(r?.url&&!map.has(r.url))map.set(r.url,r)}}const webEvidence=[...map.values()].slice(0,80);
+
       if(webEvidence.length&&refreshedCompetitors.length){const analysis=await analyzeMarketEvents(workspace,refreshedCompetitors,webEvidence,recentSignals);const byName=new Map(refreshedCompetitors.map((c:any)=>[String(c.name||"").toLowerCase(),c]));for(const event of analysis.events||[]){const competitor:any=byName.get(String(event.company_name||"").toLowerCase());if(!competitor)continue;const duplicate=recentSignals.find((s:any)=>String(s.competitor_id||"")===String(competitor.id)&&Math.max(overlap(s.title,event.title),overlap(s.summary,event.summary))>=.62);if(duplicate)continue;const impact=Math.max(0,Math.min(100,Math.round(Number(event.importance||0)*.72+Number(event.confidence||0)*.28)));const signalRows=await sbInsert("radar_signals",{workspace_id:workspace.id,competitor_id:competitor.id,signal_type:event.category||"market_event",title:event.title,summary:event.summary||event.explanation||"",impact_score:impact,confidence:event.confidence||70,status:"new",relevance:event.importance||impact,urgency:event.importance||50,novelty:70,credibility:event.confidence||70,impact:event.impact||null,explanation:event.explanation||null,suggested_action:event.suggested_action||null,fact_or_inference:event.fact_or_inference||"fact"});const signal=signalRows[0];result.signals_created++;result.market_events++;for(const url of (event.evidence_urls||[]).slice(0,6)){await sbInsert("radar_evidence",{workspace_id:workspace.id,competitor_id:competitor.id,source_url:url,source_type:"live_market_research",title:event.title,fact:event.fact_or_inference==="fact"?event.summary:`Evidence supporting inference: ${event.summary}`,summary:event.explanation||event.summary,confidence:event.confidence||70,claim_type:event.fact_or_inference||"fact"});result.evidence_created++}if(impact>=55&&event.suggested_action){await sbInsert("radar_recommendations",{workspace_id:workspace.id,competitor_id:competitor.id,priority:impact>=82?"high":impact>=65?"medium":"low",title:`Review: ${event.title}`.slice(0,240),rationale:event.impact||event.explanation||event.summary,action:event.suggested_action,status:"open"});result.recommendations_created++}try{await sbInsert("radar_intelligence_events",{workspace_id:workspace.id,competitor_id:competitor.id,event_type:event.category||"market_event",severity:impact>=90?"critical":impact>=75?"high":impact>=55?"watch":"info",title:event.title,summary:event.summary,source_url:event.evidence_urls?.[0]||null,confidence:event.confidence||70,impact_score:impact,dedupe_key:`research:${competitor.id}:${clean(event.title).slice(0,120)}`})}catch{}if(signal?.id)recentSignals.unshift(signal)}}
+
       try{const moves=await detectMovesForWorkspace(workspace.id);result.moves_correlated=moves.moves||0}catch{}
-      await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:webEvidence.length,findings:result.market_events,finished_at:new Date().toISOString()});return NextResponse.json({ok:true,...result});
+      await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:webEvidence.length,findings:result.market_events,error:null,finished_at:new Date().toISOString()});return NextResponse.json({ok:true,...result});
     }catch(error){await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"failed",error:error instanceof Error?error.message:"Refresh failed",finished_at:new Date().toISOString()}).catch(()=>{});throw error}
   }catch(error){if(error instanceof Error&&error.message==="UNAUTHORIZED")return NextResponse.json({error:"Unauthorized"},{status:401});return NextResponse.json({error:error instanceof Error?error.message:"Workspace refresh failed"},{status:500})}
 }
