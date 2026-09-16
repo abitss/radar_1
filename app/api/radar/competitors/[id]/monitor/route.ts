@@ -15,8 +15,8 @@ export async function POST(req:Request,context:{params:Promise<{id:string}>}){
     if(!competitor)return NextResponse.json({error:"Competitor not found"},{status:404});
     if(!competitor.website)return NextResponse.json({error:"Competitor website is required before monitoring can start."},{status:400});
 
-    const active=await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&status=eq.active&select=*&limit=1`);
-    if(active[0])return NextResponse.json({ok:true,monitor:active[0],alreadyActive:true});
+    const existing=await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&monitor_type=eq.entity_surveillance&status=in.(pending,active)&select=*&order=created_at.desc&limit=1`);
+    if(existing[0])return NextResponse.json({ok:true,monitor:existing[0],alreadyActive:existing[0].status==="active",alreadyPending:existing[0].status==="pending"});
 
     const origin=new URL(req.url).origin;
     const secret=process.env.RADAR_API_SECRET||"";
@@ -33,9 +33,30 @@ export async function POST(req:Request,context:{params:Promise<{id:string}>}){
       webhook:{url:`${origin}/api/radar/firecrawl-webhook`,events:["monitor.page","monitor.check.completed"],headers:secret?{"x-radar-webhook-secret":secret}:undefined},
     });
     const providerId=created?.id||created?.data?.id||created?.monitor?.id||null;
-    const inserted=await sbInsert("radar_monitors",{workspace_id:workspace.id,competitor_id:competitor.id,provider:"firecrawl",provider_monitor_id:providerId,monitor_type:"entity_surveillance",name:`High-frequency watch: ${competitor.name}`,schedule_text:"every hour",goal,status:"active"});
+    if(!providerId)return NextResponse.json({error:"Monitoring provider did not return a monitor ID, so RADAR did not mark this watch active."},{status:502});
+
+    let monitor:any=null;
+    try{
+      const inserted=await sbInsert("radar_monitors",{
+        workspace_id:workspace.id,
+        competitor_id:competitor.id,
+        provider:"firecrawl",
+        provider_monitor_id:providerId,
+        monitor_type:"entity_surveillance",
+        name:`High-frequency watch: ${competitor.name}`,
+        schedule_text:"every hour",
+        goal,
+        status:"active",
+      });
+      monitor=inserted[0]||null;
+    }catch{
+      const race=await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&monitor_type=eq.entity_surveillance&status=in.(pending,active)&select=*&order=created_at.desc&limit=1`).catch(()=>[]);
+      monitor=race[0]||null;
+      if(!monitor)throw new Error("Monitor was created by the provider but RADAR could not persist its local state.");
+    }
+
     await sbUpdate("radar_competitors",`id=eq.${competitor.id}`,{monitoring_preference:"monitor",updated_at:new Date().toISOString()});
-    return NextResponse.json({ok:true,monitor:inserted[0]||null});
+    return NextResponse.json({ok:true,monitor});
   }catch(error){
     if(error instanceof Error&&error.message==="UNAUTHORIZED")return NextResponse.json({error:"Unauthorized"},{status:401});
     return NextResponse.json({error:error instanceof Error?error.message:"Could not activate competitor monitoring"},{status:500});
