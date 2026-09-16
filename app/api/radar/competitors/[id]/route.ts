@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { deleteMonitor } from "@/lib/firecrawl";
 import { sbDelete, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
@@ -61,11 +62,16 @@ export async function DELETE(req:Request,context:{params:Promise<{id:string}>}){
     const rows=await sbSelect(`radar_competitors?id=eq.${encodeURIComponent(id)}&workspace_id=eq.${workspace.id}&select=id&limit=1`);
     if(!rows[0])return NextResponse.json({error:"Competitor not found"},{status:404});
 
-    // We do not hard-delete local monitor rows while a provider monitor may still exist externally.
-    // Mark them deleted locally so the UI stops treating them as active and no orphaned active state remains.
-    const activeMonitors=await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${id}&status=in.(active,pending)&select=id&limit=100`).catch(()=>[]);
+    const activeMonitors=await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${id}&status=in.(active,pending,error)&select=id,provider_monitor_id,status&limit=100`).catch(()=>[]);
+    const providerFailures:string[]=[];
     for(const monitor of activeMonitors){
-      await sbUpdate("radar_monitors",`id=eq.${monitor.id}`,{status:"deleted",updated_at:new Date().toISOString?.()}).catch(()=>{});
+      if(monitor.provider_monitor_id){
+        try{await deleteMonitor(String(monitor.provider_monitor_id))}
+        catch(error){providerFailures.push(error instanceof Error?error.message:"Provider monitor deletion failed")}
+      }
+    }
+    if(providerFailures.length){
+      return NextResponse.json({error:"RADAR could not safely remove this competitor because at least one provider monitor is still active. Retry after the provider recovers.",details:providerFailures.slice(0,3)},{status:502});
     }
 
     await Promise.all([
