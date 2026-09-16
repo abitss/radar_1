@@ -6,19 +6,21 @@ import { crawlStartupEngine, sourceTypeForUrl } from "@/lib/radar-engine-crawl";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
 function normalizeTerms(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(String).flatMap(x => x.split(/[,;|]/)).map(x => x.trim().toLowerCase()).filter(x => x.length > 2);
-  return String(value || "").split(/[,;|\n]/).map(x => x.trim().toLowerCase()).filter(x => x.length > 2);
+  if (Array.isArray(value)) return value.map(String).flatMap(x => x.split(/[,;|\n]/)).map(x => x.trim().toLowerCase()).filter(x => x.length > 2 && x.length < 100);
+  return String(value || "").split(/[,;|\n]/).map(x => x.trim().toLowerCase()).filter(x => x.length > 2 && x.length < 100);
 }
 function termScore(text: string, terms: string[]) { const unique=[...new Set(terms)]; return unique.length?Math.round((unique.filter(term=>text.includes(term)).length/unique.length)*100):0; }
-function classify(score:number, productOverlap:number){ if(productOverlap>=78&&score>=62)return"direct"; if(productOverlap>=55||score>=55)return"adjacent"; if(productOverlap>=32||score>=30)return"micro"; return"emerging"; }
+function classify(score:number, productOverlap:number){ if(productOverlap>=78&&score>=62)return"direct"; if(productOverlap>=55||score>=55)return"adjacent"; if(productOverlap>=32||score>=30)return"substitute"; return"emerging"; }
 function domainOf(raw:string){ try{return new URL(raw).hostname.replace(/^www\./,"").toLowerCase()}catch{return""} }
 function severityFor(impact:number){return impact>=90?"critical":impact>=75?"high":impact>=55?"watch":"info"}
+function changedEnough(previous:number,next:number){return previous===0||Math.abs(next-previous)>=5}
+function genericReviewAction(name:string,product:string,high:boolean){return high?`Compare ${name}'s ${product} against your product promise, target customer, workflow, capabilities, pricing, distribution and positioning before the next product or go-to-market decision.`:`Review the overlapping product, customer and workflow evidence and decide whether ${name} belongs in active surveillance.`}
 
 export async function POST(req: Request) {
   let run:any=null;
   try {
     const { workspace } = await workspaceForRequest(req, true);
-    const body = await req.json();
+    const body = await req.json().catch(()=>({}));
     const competitorId = body?.competitorId;
     const quick = Boolean(body?.quick);
     const competitors = await sbSelect(`radar_competitors?id=eq.${encodeURIComponent(competitorId)}&workspace_id=eq.${workspace.id}&select=*`);
@@ -36,6 +38,7 @@ export async function POST(req: Request) {
     const relatedProduct=String(competitor.related_product||"").trim();
     const founderProducts=normalizeTerms(workspace.product_keywords).slice(0,4).join(" ");
     const founderFeatures=[...normalizeTerms(workspace.major_features),...normalizeTerms(workspace.capability_keywords)].slice(0,5).join(" ");
+    const founderCustomers=[...normalizeTerms(workspace.target_customers),...normalizeTerms(workspace.buyer)].slice(0,4).join(" ");
     const productAnchor=relatedProduct||founderProducts||competitor.name;
 
     const pages:any[]=[];
@@ -55,23 +58,30 @@ export async function POST(req: Request) {
       }
     }catch{}
 
-    const queries=quick
-      ? [`site:${domain} ${productAnchor} product features`,`site:${domain} ${productAnchor} pricing customers use case`,`site:${domain} ${founderProducts} ${founderFeatures}`]
-      : [`site:${domain} ${productAnchor} product features capabilities`,`site:${domain} ${productAnchor} pricing plans packaging`,`site:${domain} ${productAnchor} customers use cases creators`,`site:${domain} ${productAnchor} docs technology AI autonomous`,`site:${domain} ${productAnchor} integrations partners launch`,`site:${domain} ${founderProducts} ${founderFeatures}`];
+    const rawQueries=quick
+      ? [`site:${domain} ${productAnchor} product features`,`site:${domain} ${productAnchor} pricing customers use cases`,`site:${domain} ${founderProducts} ${founderFeatures}`]
+      : [`site:${domain} ${productAnchor} product features capabilities`,`site:${domain} ${productAnchor} pricing plans packaging`,`site:${domain} ${productAnchor} customers use cases`,`site:${domain} ${productAnchor} docs technology integrations`,`site:${domain} ${productAnchor} partnerships launch releases`,`site:${domain} ${founderProducts} ${founderFeatures} ${founderCustomers}`];
+    const queries=rawQueries.map(q=>q.replace(/\s+/g," ").trim()).filter(q=>q.length>10).slice(0,quick?3:6);
 
-    const searchSets = await Promise.allSettled(queries.map(q=>searchWeb(q,quick?3:4)));
-    for(const set of searchSets){
-      if(set.status!=="fulfilled") continue;
-      for(const row of set.value){ if(!row?.url||seen.has(row.url)||domainOf(row.url)!==domain)continue; seen.add(row.url);pages.push(row); }
+    // Search is supplemental. The direct first-party crawl above is the primary verification path,
+    // so a provider quota or temporary outage must not invalidate a healthy scan.
+    for(const q of queries){
+      try{
+        const rows=await searchWeb(q,quick?3:4);
+        for(const row of rows){if(!row?.url||seen.has(row.url)||domainOf(row.url)!==domain)continue;seen.add(row.url);pages.push(row)}
+      }catch{}
     }
     if(!pages.length){
-      const fallback=await searchWeb(`${competitor.name} ${relatedProduct||founderProducts} official product`,4);
-      for(const row of fallback){if(row?.url&&domainOf(row.url)===domain&&!seen.has(row.url)){seen.add(row.url);pages.push(row)}}
+      try{
+        const fallback=await searchWeb(`${competitor.name} ${relatedProduct||founderProducts} official product`,4);
+        for(const row of fallback){if(row?.url&&domainOf(row.url)===domain&&!seen.has(row.url)){seen.add(row.url);pages.push(row)}}
+      }catch{}
     }
+
     const limitedPages = pages.filter(p=>domainOf(p.url)===domain).slice(0,quick?8:18);
     if(!limitedPages.length){
       await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:0,findings:0,error:"No first-party evidence was available during this scan.",finished_at:new Date().toISOString()});
-      return NextResponse.json({ok:true,degraded:true,why:`RADAR could not verify enough first-party evidence from ${competitor.name}. Existing scores were preserved.`,pages_scanned:0,strategic_crawl_pages:strategicCrawlPages,monitor_active:false,quick,confidence:0});
+      return NextResponse.json({ok:true,degraded:true,why:`RADAR could not verify enough first-party evidence from ${competitor.name}. Existing scores were preserved.`,pages_scanned:0,strategic_crawl_pages:strategicCrawlPages,monitor_active:Boolean((await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&status=eq.active&select=id&limit=1`).catch(()=>[]))[0]),quick,confidence:0});
     }
 
     const corpus=limitedPages.map(p=>`${p.title||""}\n${p.description||""}\n${p.markdown||""}`).join("\n\n").toLowerCase().slice(0,quick?110000:220000);
@@ -95,7 +105,9 @@ export async function POST(req: Request) {
     const productLabel=relatedProduct||competitor.name;
     const why=`${productLabel} has ${productOverlap}% verified product overlap with ${workspace.name}. Overall strategic similarity is ${weighted}% and threat is ${threat}%.${matched.length?` Shared evidence includes ${matched.slice(0,8).join(", ")}.`:""}`;
 
-    const evidenceRows = limitedPages.slice(0,quick?6:10).map(page=>({workspace_id:workspace.id,competitor_id:competitor.id,source_url:page.url,source_type:"first_party_product_scan",title:String(page.title||`${competitor.name} product page`).slice(0,200),fact:String(page.description||`First-party page related to ${productLabel}.`).slice(0,1000),summary:String(page.markdown||page.description||"").replace(/\s+/g," ").slice(0,2200),confidence,claim_type:"fact"}));
+    const existingEvidence=await sbSelect(`radar_evidence?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&source_type=eq.first_party_product_scan&select=id,source_url&limit=500`).catch(()=>[]);
+    const evidenceUrls=new Set(existingEvidence.map((e:any)=>String(e.source_url||"")));
+    const evidenceRows = limitedPages.slice(0,quick?6:10).filter(page=>!evidenceUrls.has(page.url)).map(page=>({workspace_id:workspace.id,competitor_id:competitor.id,source_url:page.url,source_type:"first_party_product_scan",title:String(page.title||`${competitor.name} product page`).slice(0,200),fact:String(page.description||`First-party page related to ${productLabel}.`).slice(0,1000),summary:String(page.markdown||page.description||"").replace(/\s+/g," ").slice(0,2200),confidence,claim_type:"fact"}));
     if(evidenceRows.length) await sbInsert("radar_evidence",evidenceRows);
 
     const existingSources=await sbSelect(`radar_sources?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&select=id,url&limit=500`);
@@ -119,29 +131,39 @@ export async function POST(req: Request) {
     const existingDims=await sbSelect(`radar_similarity_dimensions?competitor_id=eq.${competitor.id}&select=id`);
     if(existingDims[0]) await sbUpdate("radar_similarity_dimensions",`id=eq.${existingDims[0].id}`,dims); else await sbInsert("radar_similarity_dimensions",{competitor_id:competitor.id,...dims});
 
-    await Promise.all([
-      sbUpdate("radar_competitors",`id=eq.${competitor.id}`,{previous_similarity_score:previous,similarity_score:weighted,product_overlap_score:productOverlap,relation_confidence:Math.max(Number(competitor.relation_confidence||0),confidence),threat_score:threat,momentum_score:Math.min(100,momentumBase+Math.abs(weighted-previous)),movement,category,why_it_matters:why,last_scanned_at:new Date().toISOString(),updated_at:new Date().toISOString()}),
-      sbInsert("radar_signals",{workspace_id:workspace.id,competitor_id:competitor.id,signal_type:movement==="closer"?"competitive_convergence":"product_intelligence",title:movement==="closer"?`${competitor.name} moved closer through ${productLabel}`:`${competitor.name}: ${productOverlap}% product overlap`,summary:why,impact_score:threat,confidence,status:"new"}),
-      sbInsert("radar_intelligence_events",{workspace_id:workspace.id,competitor_id:competitor.id,event_type:movement==="closer"?"competitive_convergence":"deep_scan",severity:severityFor(threat),title:movement==="closer"?`${competitor.name} moved closer`:`${competitor.name} intelligence refreshed`,summary:why,source_url:limitedPages[0]?.url||competitor.website,confidence,impact_score:threat,dedupe_key:`deep_scan:${competitor.id}:${new Date().toISOString().slice(0,13)}`}),
-      (productOverlap>=35||weighted>=45||movement==="closer") ? sbInsert("radar_recommendations",{workspace_id:workspace.id,competitor_id:competitor.id,priority:productOverlap>=75||threat>=80?"high":productOverlap>=50||weighted>=55?"medium":"low",title:`Review ${competitor.name}'s ${productLabel}`,rationale:why,action:productOverlap>=70?"Compare product promise, autonomous capabilities, target user, pricing, camera/AI workflow and differentiation before the next product or GTM decision.":"Review the overlapping product capabilities and decide whether this product belongs in active surveillance."}) : Promise.resolve(null),
-    ]);
+    await sbUpdate("radar_competitors",`id=eq.${competitor.id}`,{previous_similarity_score:previous,similarity_score:weighted,product_overlap_score:productOverlap,relation_confidence:Math.max(Number(competitor.relation_confidence||0),confidence),threat_score:threat,momentum_score:Math.min(100,momentumBase+Math.abs(weighted-previous)),movement,category,why_it_matters:why,last_scanned_at:new Date().toISOString(),updated_at:new Date().toISOString()});
 
-    let monitorActive = false;
-    if(!quick){
-      const existingMonitor=await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&monitor_type=eq.entity_surveillance&status=eq.active&select=id&limit=1`);
-      monitorActive = Boolean(existingMonitor[0]);
-      if(!existingMonitor[0]&&limitedPages.length){
-        const urls=[...new Set(limitedPages.map(p=>p.url).filter((u:string)=>domainOf(u)===domain))].slice(0,10);
-        const secret=process.env.RADAR_API_SECRET||"";
-        const created=await createMonitor({name:`RADAR · ${competitor.name} · ${productLabel}`,schedule:{text:"every hour",timezone:"UTC"},targets:[{type:"scrape",urls,scrapeOptions:{}}],goal:`Watch ${competitor.name}'s ${productLabel} for meaningful changes in product capabilities, autonomous behavior, AI/technology, target customers, use cases, camera/creator workflow, pricing, positioning, launches and partnerships. Ignore unrelated products and cosmetic page edits.`,judgeEnabled:true,webhook:{url:`${new URL(req.url).origin}/api/radar/firecrawl-webhook`,events:["monitor.page","monitor.check.completed"],headers:secret?{"x-radar-webhook-secret":secret}:undefined}});
-        const providerId=created?.id||created?.data?.id||created?.monitor?.id;
-        await sbInsert("radar_monitors",{workspace_id:workspace.id,competitor_id:competitor.id,provider:"firecrawl",provider_monitor_id:providerId||null,monitor_type:"entity_surveillance",name:`Product surveillance: ${competitor.name} · ${productLabel}`,schedule_text:"every hour",goal:`Meaningful changes to ${productLabel}`,status:"active"});
-        monitorActive = true;
+    const materialChange=movement==="closer"||movement==="away"||changedEnough(previous,weighted);
+    if(materialChange){
+      await Promise.allSettled([
+        sbInsert("radar_signals",{workspace_id:workspace.id,competitor_id:competitor.id,signal_type:movement==="closer"?"competitive_convergence":"product_intelligence",title:movement==="closer"?`${competitor.name} moved closer through ${productLabel}`:`${competitor.name}: ${productOverlap}% product overlap`,summary:why,impact_score:threat,confidence,status:"new"}),
+        sbInsert("radar_intelligence_events",{workspace_id:workspace.id,competitor_id:competitor.id,event_type:movement==="closer"?"competitive_convergence":"deep_scan",severity:severityFor(threat),title:movement==="closer"?`${competitor.name} moved closer`:`${competitor.name} intelligence refreshed`,summary:why,source_url:limitedPages[0]?.url||competitor.website,confidence,impact_score:threat,dedupe_key:`deep_scan:${competitor.id}:${new Date().toISOString().slice(0,13)}`}),
+      ]);
+      if(productOverlap>=35||weighted>=45||movement==="closer"){
+        const recentRecommendation=await sbSelect(`radar_recommendations?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&status=eq.open&select=id,created_at&order=created_at.desc&limit=1`).catch(()=>[]);
+        const fresh=recentRecommendation[0]?.created_at&&Date.now()-new Date(recentRecommendation[0].created_at).getTime()<24*60*60*1000;
+        if(!fresh)await sbInsert("radar_recommendations",{workspace_id:workspace.id,competitor_id:competitor.id,priority:productOverlap>=75||threat>=80?"high":productOverlap>=50||weighted>=55?"medium":"low",title:`Review ${competitor.name}'s ${productLabel}`,rationale:why,action:genericReviewAction(competitor.name,productLabel,productOverlap>=70),status:"open"}).catch(()=>{});
       }
     }
 
+    let monitorActive = false;let monitorError:string|null=null;
+    const existingMonitor=await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&status=eq.active&select=id&limit=1`).catch(()=>[]);
+    monitorActive=Boolean(existingMonitor[0]);
+    if(!quick&&!monitorActive&&limitedPages.length){
+      try{
+        const urls=[...new Set(limitedPages.map(p=>p.url).filter((u:string)=>domainOf(u)===domain))].slice(0,10);
+        const secret=process.env.RADAR_API_SECRET||"";
+        const goal=`Watch ${competitor.name}'s ${productLabel} for meaningful changes in product capabilities, pricing, packaging, positioning, target customers, use cases, technology, integrations, distribution, geography, launches, partnerships and customer evidence. Ignore unrelated business lines and cosmetic page edits.`;
+        const created=await createMonitor({name:`RADAR · ${competitor.name} · ${productLabel}`,schedule:{text:"every hour",timezone:"UTC"},targets:[{type:"scrape",urls,scrapeOptions:{}}],goal,judgeEnabled:true,webhook:{url:`${new URL(req.url).origin}/api/radar/firecrawl-webhook`,events:["monitor.page","monitor.check.completed"],headers:secret?{"x-radar-webhook-secret":secret}:undefined}});
+        const providerId=created?.id||created?.data?.id||created?.monitor?.id;
+        await sbInsert("radar_monitors",{workspace_id:workspace.id,competitor_id:competitor.id,provider:"firecrawl",provider_monitor_id:providerId||null,monitor_type:"entity_surveillance",name:`Product surveillance: ${competitor.name} · ${productLabel}`,schedule_text:"every hour",goal,status:"active"});
+        await sbUpdate("radar_competitors",`id=eq.${competitor.id}`,{monitoring_preference:"monitor",updated_at:new Date().toISOString()}).catch(()=>{});
+        monitorActive = true;
+      }catch(error){monitorError=error instanceof Error?error.message:"Monitor activation failed";}
+    }
+
     await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:limitedPages.length,findings:matched.length,error:null,finished_at:new Date().toISOString()});
-    return NextResponse.json({similarity:weighted,product_overlap:productOverlap,threat,movement,category,matched,dimensions:dims,why,pages_scanned:limitedPages.length,strategic_crawl_pages:strategicCrawlPages,monitor_active:monitorActive,quick,confidence});
+    return NextResponse.json({ok:true,similarity:weighted,product_overlap:productOverlap,threat,movement,category,matched,dimensions:dims,why,pages_scanned:limitedPages.length,strategic_crawl_pages:strategicCrawlPages,monitor_active:monitorActive,monitor_error:monitorError,quick,confidence,evidence_added:evidenceRows.length,material_change:materialChange});
   } catch (error) {
     if(run?.id)try{await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"failed",error:error instanceof Error?error.message.slice(0,500):"Scan failed",finished_at:new Date().toISOString()})}catch{}
     if(error instanceof Error&&error.message==="UNAUTHORIZED") return NextResponse.json({error:"Unauthorized"},{status:401});
