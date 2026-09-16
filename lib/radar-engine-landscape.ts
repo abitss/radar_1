@@ -47,21 +47,50 @@ export async function runCompetitiveLandscape(workspaceId:string):Promise<Landsc
     if(looksLikeSourceUrl(website,itemName,String(item?.summary||""))&&radarDomain(evidenceUrls[0])===d)continue;
     if(firstEvidence&&looksLikeSourceUrl(website,firstEvidence.title,firstEvidence.description)&&radarDomain(firstEvidence.url)===d)continue;
 
-    const similarity=clamp(item?.similarity),threat=clamp(item?.threat),confidence=clamp(item?.confidence,65),productOverlap=clamp(item?.components?.product,Math.round(similarity*.75)),strategicRelevance=clamp(item?.threat_components?.strategic_relevance,similarity),momentum=clamp(item?.threat_components?.momentum,40),suggestedCategory=safeCategory(item?.classification);
+    const inferredSimilarity=clamp(item?.similarity),inferredThreat=clamp(item?.threat),confidence=clamp(item?.confidence,65),inferredProduct=clamp(item?.components?.product,Math.round(inferredSimilarity*.75)),strategicRelevance=clamp(item?.threat_components?.strategic_relevance,inferredSimilarity),inferredMomentum=clamp(item?.threat_components?.momentum,40),suggestedCategory=safeCategory(item?.classification);
     const current:any=byDomain.get(d)||byName.get(itemName.toLowerCase())||null;
-    const category=current?.category_locked?current.category:suggestedCategory;
-    const why=`${item?.related_product?`${itemName} makes ${String(item.related_product)}. `:""}${String(item?.rationale||item?.summary||"")} RADAR landscape similarity ${similarity}%, threat ${threat}%, confidence ${confidence}%.${current?.category_locked?` Founder category override preserved as ${current.category}.`:""}`;
-    const patch:any={name:itemName,website,description:String(item?.summary||item?.related_product||current?.description||"").slice(0,2000)||null,category,similarity_score:similarity,threat_score:threat,momentum_score:momentum,product_overlap_score:productOverlap,relation_confidence:confidence,related_product:String(item?.related_product||current?.related_product||"").slice(0,500)||null,relationship_reason:String(item?.rationale||item?.summary||current?.relationship_reason||"").slice(0,2400)||null,discovery_source_url:evidenceUrls[0],monitoring_preference:current?.monitoring_preference||"auto",movement:current?.movement||"stable",why_it_matters:why.slice(0,3000),updated_at:new Date().toISOString()};
+    const verified=Boolean(current?.last_scanned_at);
+    const category=current?.category_locked||verified?(current?.category||suggestedCategory):suggestedCategory;
+    const why=`${item?.related_product?`${itemName} makes ${String(item.related_product)}. `:""}${String(item?.rationale||item?.summary||"")} RADAR landscape inference: similarity ${inferredSimilarity}%, threat ${inferredThreat}%, confidence ${confidence}%.${verified?" Existing first-party verified scores were preserved.":""}${current?.category_locked?` Founder category override preserved as ${current.category}.`:""}`;
+
+    const patch:any={
+      name:itemName,
+      website,
+      description:String(item?.summary||item?.related_product||current?.description||"").slice(0,2000)||null,
+      category,
+      relation_confidence:Math.max(Number(current?.relation_confidence||0),confidence),
+      related_product:String(item?.related_product||current?.related_product||"").slice(0,500)||null,
+      relationship_reason:String(item?.rationale||item?.summary||current?.relationship_reason||"").slice(0,2400)||null,
+      discovery_source_url:evidenceUrls[0],
+      monitoring_preference:current?.monitoring_preference||"auto",
+      movement:current?.movement||"stable",
+      why_it_matters:verified?(current?.why_it_matters||why.slice(0,3000)):why.slice(0,3000),
+      updated_at:new Date().toISOString(),
+    };
+    if(!verified){
+      patch.similarity_score=inferredSimilarity;
+      patch.threat_score=inferredThreat;
+      patch.momentum_score=inferredMomentum;
+      patch.product_overlap_score=inferredProduct;
+    }
     if(!current)patch.category_locked=false;
+
     let competitor:any=current;
     if(current?.id){const rows:any[]=await sbUpdate("radar_competitors",`id=eq.${encodeURIComponent(String(current.id))}&workspace_id=eq.${encodeURIComponent(workspaceId)}`,patch);competitor=rows[0]||current;updated++}
-    else{const rows:any[]=await sbInsert("radar_competitors",{workspace_id:workspaceId,...patch});competitor=rows[0]||null;inserted++;if(competitor){byDomain.set(d,competitor);byName.set(itemName.toLowerCase(),competitor)}}
+    else{const rows:any[]=await sbInsert("radar_competitors",{workspace_id:workspaceId,similarity_score:inferredSimilarity,threat_score:inferredThreat,momentum_score:inferredMomentum,product_overlap_score:inferredProduct,...patch});competitor=rows[0]||null;inserted++;if(competitor){byDomain.set(d,competitor);byName.set(itemName.toLowerCase(),competitor)}}
     if(!competitor?.id)continue;
 
-    const problemOverlap=clamp(item?.components?.problem),featureOverlap=clamp(item?.components?.features);const dims:any={problem_overlap:problemOverlap,customer_overlap:clamp(item?.components?.customer),buyer_overlap:clamp(item?.components?.customer),product_overlap:productOverlap,workflow_overlap:Math.round((problemOverlap+productOverlap+featureOverlap)/3),feature_overlap:featureOverlap,technology_overlap:clamp(item?.components?.technology),business_model_overlap:clamp(item?.components?.business_model),distribution_overlap:clamp(item?.components?.distribution),geography_overlap:clamp(item?.components?.geography),updated_at:new Date().toISOString()};
-    const existingDims:any[]=await sbSelect(`radar_similarity_dimensions?competitor_id=eq.${encodeURIComponent(String(competitor.id))}&select=id&limit=1`);if(existingDims[0]?.id)await sbUpdate("radar_similarity_dimensions",`id=eq.${encodeURIComponent(String(existingDims[0].id))}`,dims);else await sbInsert("radar_similarity_dimensions",{competitor_id:competitor.id,...dims});
+    // Inferred landscape dimensions are useful before verification, but must never replace
+    // first-party dimensions produced by a successful deep scan.
+    if(!verified){
+      const problemOverlap=clamp(item?.components?.problem),featureOverlap=clamp(item?.components?.features);const dims:any={problem_overlap:problemOverlap,customer_overlap:clamp(item?.components?.customer),buyer_overlap:clamp(item?.components?.customer),product_overlap:inferredProduct,workflow_overlap:Math.round((problemOverlap+inferredProduct+featureOverlap)/3),feature_overlap:featureOverlap,technology_overlap:clamp(item?.components?.technology),business_model_overlap:clamp(item?.components?.business_model),distribution_overlap:clamp(item?.components?.distribution),geography_overlap:clamp(item?.components?.geography),updated_at:new Date().toISOString()};
+      const existingDims:any[]=await sbSelect(`radar_similarity_dimensions?competitor_id=eq.${encodeURIComponent(String(competitor.id))}&select=id&limit=1`);if(existingDims[0]?.id)await sbUpdate("radar_similarity_dimensions",`id=eq.${encodeURIComponent(String(existingDims[0].id))}`,dims);else await sbInsert("radar_similarity_dimensions",{competitor_id:competitor.id,...dims});
+    }
+
     for(const url of evidenceUrls.slice(0,6)){const source:any=evidenceMap.get(url);const duplicates:any[]=await sbSelect(`radar_evidence?workspace_id=eq.${encodeURIComponent(workspaceId)}&competitor_id=eq.${encodeURIComponent(String(competitor.id))}&source_url=eq.${encodeURIComponent(url)}&select=id&limit=1`);if(duplicates[0])continue;await sbInsert("radar_evidence",{workspace_id:workspaceId,competitor_id:competitor.id,source_url:url,source_type:"competitive_landscape",title:String(source?.title||itemName).slice(0,240),fact:String(source?.description||item?.summary||item?.rationale||"").slice(0,1400),summary:String(item?.rationale||item?.summary||"").slice(0,2200),confidence,claim_type:"supporting"});evidenceCount++}
-    if(threat>=65||strategicRelevance>=65){try{await sbInsert("radar_intelligence_events",{workspace_id:workspaceId,competitor_id:competitor.id,event_type:current?"landscape_update":"new_competitor",severity:threat>=90?"critical":threat>=75?"high":"watch",title:current?`${itemName} competitive position refreshed`:`New competitor detected: ${itemName}`,summary:why.slice(0,2200),source_url:evidenceUrls[0],confidence,impact_score:threat,dedupe_key:`landscape:${String(competitor.id)}:${new Date().toISOString().slice(0,10)}`})}catch{}}
+
+    const eventThreat=verified?Number(competitor.threat_score||0):inferredThreat;
+    if(eventThreat>=65||strategicRelevance>=65){try{await sbInsert("radar_intelligence_events",{workspace_id:workspaceId,competitor_id:competitor.id,event_type:current?"landscape_update":"new_competitor",severity:eventThreat>=90?"critical":eventThreat>=75?"high":"watch",title:current?`${itemName} competitive landscape refreshed`:`New competitor detected: ${itemName}`,summary:why.slice(0,2200),source_url:evidenceUrls[0],confidence,impact_score:eventThreat,dedupe_key:`landscape:${String(competitor.id)}:${new Date().toISOString().slice(0,10)}`})}catch{}}
   }
   return{inspected:evidenceRows.length,analyzed:competitors.length,updated,inserted,evidence:evidenceCount,themes:Array.isArray(landscape?.market_themes)?landscape.market_themes:[]};
 }
