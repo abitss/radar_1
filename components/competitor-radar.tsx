@@ -14,12 +14,15 @@ type Competitor = {
   relation_confidence?: number;
   threat_score: number;
   category: CanonicalCategory | "micro" | string;
+  category_locked?: boolean;
+  monitoring_preference?: "auto"|"monitor"|"ignore"|string;
   movement: "closer" | "stable" | "away";
   why_it_matters?: string;
   related_product?: string;
   last_scanned_at?: string;
   monitor_active?: boolean;
   monitor_last_event_at?: string | null;
+  monitor_error?: string | null;
   evidence_count?: number;
   high_confidence_evidence?: number;
   verification_status?: "verified" | "evidence-backed" | "provisional";
@@ -60,13 +63,15 @@ export function CompetitorRadar(){
       if(!cr.ok)throw new Error(c?.error||"Could not load competitors");
       const rows=Array.isArray(c)?c:[];
       setWorkspace(w);setCompetitors(rows);setLoadError("");
-      setSelectedId(current=>current&&rows.some((row:any)=>row.id===current)?current:(rows[0]?.id||""));
+      const activeRows=rows.filter((row:any)=>row.monitoring_preference!=="ignore");
+      setSelectedId(current=>current&&activeRows.some((row:any)=>row.id===current)?current:(activeRows[0]?.id||""));
     }catch(error){if(!silent)setLoadError(error instanceof Error?error.message:"Could not load RADAR")}
   }
 
   useEffect(()=>{load();const timer=window.setInterval(()=>load(true),10000);const onFocus=()=>load(true);window.addEventListener("focus",onFocus);return()=>{window.clearInterval(timer);window.removeEventListener("focus",onFocus)}},[]);
 
-  const normalized=useMemo(()=>competitors.map(c=>({...c,category:canonicalCategory(c.category)})),[competitors]);
+  const normalized=useMemo(()=>competitors.filter(c=>c.monitoring_preference!=="ignore").map(c=>({...c,category:canonicalCategory(c.category)})),[competitors]);
+  const ignoredCount=useMemo(()=>competitors.filter(c=>c.monitoring_preference==="ignore").length,[competitors]);
   const filterOptions=useMemo(()=>(["all",...CATEGORY_ORDER.filter(cat=>normalized.some(c=>c.category===cat))] as Array<"all"|CanonicalCategory>),[normalized]);
   const visible=useMemo(()=>normalized.filter(c=>filter==="all"||c.category===filter).sort((a,b)=>Number(b.similarity_score||0)-Number(a.similarity_score||0)),[normalized,filter]);
   const plotted=visible.slice(0,40);
@@ -79,7 +84,7 @@ export function CompetitorRadar(){
     try{
       const res=await fetch("/api/radar/competitors",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,website})});const data=await res.json();
       if(!res.ok)throw new Error(data.error||"Could not add competitor");
-      setName("");setWebsite("");setSelectedId(data.id||"");await load(true);setMessage("Competitor added to the watchlist. Run a deep scan to verify its position.");
+      setName("");setWebsite("");setSelectedId(data.id||"");await load(true);setMessage("Company added to the watchlist as provisional. Run a deep scan to verify its position.");
     }catch(error){setMessage(error instanceof Error?error.message:"Could not add competitor")}finally{setAdding(false)}
   }
 
@@ -90,14 +95,14 @@ export function CompetitorRadar(){
       if(!res.ok&&!data?.cooldown)throw new Error(data.error||"Scan failed");
       if(data?.cooldown)setMessage(data.error||"A scan is already running.");
       else if(data?.degraded)setMessage(data.why||"No first-party evidence was available, so existing scores were preserved.");
-      else setMessage(`Verified ${selected.name}: ${Math.round(Number(data.similarity||0))}% strategic similarity · ${Math.round(Number(data.product_overlap||0))}% product overlap · ${Math.round(Number(data.threat||0))}% threat.`);
+      else setMessage(`Verified ${selected.name}: ${Math.round(Number(data.similarity||0))}% strategic similarity · ${Math.round(Number(data.product_overlap||0))}% product overlap · ${Math.round(Number(data.threat||0))}% threat.${data.category_locked?` Founder category remains locked as ${data.category}.`:""}`);
       await load(true);
     }catch(error){setMessage(error instanceof Error?error.message:"Scan failed")}finally{setScanningId("")}
   }
 
   async function startMonitor(){
     if(!selected||selected.monitor_active||monitoringId)return;setMonitoringId(selected.id);setMessage(`Activating continuous watch for ${selected.name}...`);
-    try{const res=await fetch(`/api/radar/competitors/${selected.id}/monitor`,{method:"POST"});const data=await res.json();if(!res.ok)throw new Error(data.error||"Could not activate monitoring");await load(true);setMessage(`${selected.name} is now under continuous entity surveillance.`)}catch(error){setMessage(error instanceof Error?error.message:"Could not activate monitoring")}finally{setMonitoringId("")}
+    try{const res=await fetch(`/api/radar/competitors/${selected.id}/monitor`,{method:"POST"});const data=await res.json();if(!res.ok)throw new Error(data.error||"Could not activate monitoring");await load(true);setMessage(data.alreadyPending?`${selected.name} monitoring activation is already pending.`:`${selected.name} is now under continuous entity surveillance.`)}catch(error){setMessage(error instanceof Error?error.message:"Could not activate monitoring")}finally{setMonitoringId("")}
   }
 
   return <section className="competition-command">
@@ -123,9 +128,9 @@ export function CompetitorRadar(){
           <div className="radar-sweep"/>
           <button className="company-core" aria-label="Your company"><span>YOU</span><strong>{(workspace?.name||"YOUR COMPANY").slice(0,18)}</strong></button>
           {plotted.map(company=>{const p=positionFor(company);const state=verification(company);return <button key={company.id} className={`competitor-node ${company.category} ${state} ${selected?.id===company.id?"selected":""}`} style={{left:`${p.x}%`,top:`${p.y}%`}} onClick={()=>setSelectedId(company.id)} title={`${company.name} · ${Math.round(clamp(company.similarity_score))}% similarity · ${state}`} aria-label={`${company.name}, ${Math.round(clamp(company.similarity_score))}% similarity, ${state}`}><span className="node-dot"/><strong>{company.name}</strong><small>{Math.round(clamp(company.similarity_score))}%</small></button>})}
-          {!normalized.length?<div className="radar-empty-state"><Radar size={30}/><strong>Your competitive universe is empty.</strong><span>Run discovery or add a company to begin mapping.</span></div>:!visible.length?<div className="radar-empty-state"><Layers3 size={30}/><strong>No companies in this filter.</strong><span>Choose another competitive category.</span></div>:null}
+          {!normalized.length?<div className="radar-empty-state"><Radar size={30}/><strong>Your competitive universe is empty.</strong><span>Run discovery or add a company to begin mapping.{ignoredCount?` ${ignoredCount} founder-ignored entit${ignoredCount===1?"y is":"ies are"} hidden.`:""}</span></div>:!visible.length?<div className="radar-empty-state"><Layers3 size={30}/><strong>No companies in this filter.</strong><span>Choose another competitive category.</span></div>:null}
         </div>
-        <footer className="competition-legend"><span>CORE 80–100% similarity</span><span>NEAR 60–79%</span><span>WATCH 35–59%</span><span>OUTER &lt;35%</span>{visible.length>40?<span>Top 40 plotted</span>:null}</footer>
+        <footer className="competition-legend"><span>CORE 80–100% similarity</span><span>NEAR 60–79%</span><span>WATCH 35–59%</span><span>OUTER &lt;35%</span>{visible.length>40?<span>Top 40 plotted</span>:null}{ignoredCount?<span>{ignoredCount} ignored hidden</span>:null}</footer>
       </article>
 
       <aside className="competition-detail panel">
@@ -134,8 +139,8 @@ export function CompetitorRadar(){
           <div className="competition-product-line"><span>COMPETING PRODUCT / OFFER</span><strong>{selected.related_product||"Specific product relationship still being resolved"}</strong></div>
           <div className="competition-score-row radar-three-scores"><div><span>Similarity</span><strong>{Math.round(clamp(selected.similarity_score))}%</strong><i><b style={{width:`${clamp(selected.similarity_score)}%`}}/></i></div><div><span>Product overlap</span><strong>{Math.round(clamp(selected.product_overlap_score))}%</strong><i><b style={{width:`${clamp(selected.product_overlap_score)}%`}}/></i></div><div><span>Threat</span><strong>{Math.round(clamp(selected.threat_score))}%</strong><i><b style={{width:`${clamp(selected.threat_score)}%`}}/></i></div></div>
           <div className="competition-why"><span>WHY RADAR PLACED IT HERE</span><p>{selected.why_it_matters||"Run a deep scan to calculate evidence-backed strategic overlap."}</p></div>
-          <div className="overlap-stack"><span>INTELLIGENCE STATE</span><div><ShieldCheck size={13}/><strong>{categoryLabel(selected.category)} relationship · {verification(selected)}</strong></div><div><Activity size={13}/><strong>{Number(selected.evidence_count||0)} evidence item{Number(selected.evidence_count||0)===1?"":"s"} · {Number(selected.high_confidence_evidence||0)} high-confidence</strong></div><div><Radio size={13}/><strong>{selected.monitor_active?`Monitoring active · last event ${when(selected.monitor_last_event_at)}`:"Continuous watch not active"}</strong></div></div>
-          <div className="competition-actions radar-action-grid"><button onClick={deepScan} disabled={Boolean(scanningId)}><Search size={14}/>{scanningId===selected.id?"Scanning...":"Deep scan"}</button><button onClick={startMonitor} disabled={selected.monitor_active||Boolean(monitoringId)}><Radio size={14}/>{selected.monitor_active?"Monitoring":monitoringId===selected.id?"Activating...":"Monitor"}</button><Link href={`/companies/${selected.id}`}><GitBranch size={14}/>Open dossier</Link><a href={selected.website} target="_blank" rel="noreferrer"><ExternalLink size={14}/>Website</a></div>
+          <div className="overlap-stack"><span>INTELLIGENCE STATE</span><div><ShieldCheck size={13}/><strong>{categoryLabel(selected.category)} relationship · {verification(selected)}{selected.category_locked?" · founder locked":""}</strong></div><div><Activity size={13}/><strong>{Math.round(clamp(selected.relation_confidence))}% relationship confidence · {Number(selected.evidence_count||0)} evidence item{Number(selected.evidence_count||0)===1?"":"s"} · {Number(selected.high_confidence_evidence||0)} high-confidence</strong></div><div><Radio size={13}/><strong>{selected.monitor_active?`Monitoring active · last event ${when(selected.monitor_last_event_at)}`:selected.monitor_error?`Monitor error · ${selected.monitor_error}`:"Continuous watch not active"}</strong></div></div>
+          <div className="competition-actions radar-action-grid"><button onClick={deepScan} disabled={Boolean(scanningId)}><Search size={14}/>{scanningId===selected.id?"Scanning...":"Deep scan"}</button><button onClick={startMonitor} disabled={selected.monitor_active||Boolean(monitoringId)}><Radio size={14}/>{selected.monitor_active?"Monitoring":monitoringId===selected.id?"Activating...":"Monitor"}</button><Link href={`/companies/${selected.id}`}><GitBranch size={14}/>Open dossier</Link>{selected.website?<a href={selected.website} target="_blank" rel="noreferrer"><ExternalLink size={14}/>Website</a>:<span/>}</div>
         </>:<div className="competition-empty-detail"><Layers3 size={24}/><strong>Select a company</strong><p>RADAR will show evidence-backed similarity, product overlap and threat here.</p></div>}
       </aside>
     </div>
