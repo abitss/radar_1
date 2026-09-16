@@ -15,6 +15,7 @@ function domainOf(raw:string){ try{return new URL(raw).hostname.replace(/^www\./
 function severityFor(impact:number){return impact>=90?"critical":impact>=75?"high":impact>=55?"watch":"info"}
 
 export async function POST(req: Request) {
+  let run:any=null;
   try {
     const { workspace } = await workspaceForRequest(req, true);
     const body = await req.json();
@@ -27,7 +28,11 @@ export async function POST(req: Request) {
     if(!domain) return NextResponse.json({error:"Competitor website is invalid."},{status:400});
     if(competitor.last_scanned_at&&Date.now()-new Date(competitor.last_scanned_at).getTime()<3*60*1000) return NextResponse.json({error:"This competitor was deep-scanned recently. Wait a few minutes before scanning again.",cooldown:true},{status:429});
 
-    const run=(await sbInsert("radar_scan_runs",{workspace_id:workspace.id,competitor_id:competitor.id,run_type:"deep_public_scan",status:"running"}))[0];
+    const activeCutoff=new Date(Date.now()-10*60*1000).toISOString();
+    const activeRuns=await sbSelect(`radar_scan_runs?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&run_type=eq.deep_public_scan&status=eq.running&started_at=gte.${encodeURIComponent(activeCutoff)}&select=id,started_at&order=started_at.asc&limit=1`);
+    if(activeRuns[0]) return NextResponse.json({error:"A deep scan is already running for this competitor.",cooldown:true,running:true,run_id:activeRuns[0].id},{status:429});
+
+    run=(await sbInsert("radar_scan_runs",{workspace_id:workspace.id,competitor_id:competitor.id,run_type:"deep_public_scan",status:"running"}))[0];
     const relatedProduct=String(competitor.related_product||"").trim();
     const founderProducts=normalizeTerms(workspace.product_keywords).slice(0,4).join(" ");
     const founderFeatures=[...normalizeTerms(workspace.major_features),...normalizeTerms(workspace.capability_keywords)].slice(0,5).join(" ");
@@ -64,6 +69,10 @@ export async function POST(req: Request) {
       for(const row of fallback){if(row?.url&&domainOf(row.url)===domain&&!seen.has(row.url)){seen.add(row.url);pages.push(row)}}
     }
     const limitedPages = pages.filter(p=>domainOf(p.url)===domain).slice(0,quick?8:18);
+    if(!limitedPages.length){
+      await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:0,findings:0,error:"No first-party evidence was available during this scan.",finished_at:new Date().toISOString()});
+      return NextResponse.json({ok:true,degraded:true,why:`RADAR could not verify enough first-party evidence from ${competitor.name}. Existing scores were preserved.`,pages_scanned:0,strategic_crawl_pages:strategicCrawlPages,monitor_active:false,quick,confidence:0});
+    }
 
     const corpus=limitedPages.map(p=>`${p.title||""}\n${p.description||""}\n${p.markdown||""}`).join("\n\n").toLowerCase().slice(0,quick?110000:220000);
     const productTerms=[...normalizeTerms(workspace.product_keywords),...normalizeTerms(relatedProduct)].slice(0,16);
@@ -84,9 +93,7 @@ export async function POST(req: Request) {
     const category=classify(weighted,productOverlap);
     const matched=[...new Set([...productTerms,...capabilityTerms,...techTerms,...customerTerms,...problemTerms])].filter(term=>corpus.includes(term)).slice(0,24);
     const productLabel=relatedProduct||competitor.name;
-    const why=limitedPages.length
-      ? `${productLabel} has ${productOverlap}% verified product overlap with ${workspace.name}. Overall strategic similarity is ${weighted}% and threat is ${threat}%.${matched.length?` Shared evidence includes ${matched.slice(0,8).join(", ")}.`:""}`
-      : `RADAR could not verify enough first-party product evidence from ${competitor.name}. Keep this company provisional until stronger evidence is available.`;
+    const why=`${productLabel} has ${productOverlap}% verified product overlap with ${workspace.name}. Overall strategic similarity is ${weighted}% and threat is ${threat}%.${matched.length?` Shared evidence includes ${matched.slice(0,8).join(", ")}.`:""}`;
 
     const evidenceRows = limitedPages.slice(0,quick?6:10).map(page=>({workspace_id:workspace.id,competitor_id:competitor.id,source_url:page.url,source_type:"first_party_product_scan",title:String(page.title||`${competitor.name} product page`).slice(0,200),fact:String(page.description||`First-party page related to ${productLabel}.`).slice(0,1000),summary:String(page.markdown||page.description||"").replace(/\s+/g," ").slice(0,2200),confidence,claim_type:"fact"}));
     if(evidenceRows.length) await sbInsert("radar_evidence",evidenceRows);
@@ -133,9 +140,10 @@ export async function POST(req: Request) {
       }
     }
 
-    await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:limitedPages.length,findings:matched.length,finished_at:new Date().toISOString()});
+    await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:limitedPages.length,findings:matched.length,error:null,finished_at:new Date().toISOString()});
     return NextResponse.json({similarity:weighted,product_overlap:productOverlap,threat,movement,category,matched,dimensions:dims,why,pages_scanned:limitedPages.length,strategic_crawl_pages:strategicCrawlPages,monitor_active:monitorActive,quick,confidence});
   } catch (error) {
+    if(run?.id)try{await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"failed",error:error instanceof Error?error.message.slice(0,500):"Scan failed",finished_at:new Date().toISOString()})}catch{}
     if(error instanceof Error&&error.message==="UNAUTHORIZED") return NextResponse.json({error:"Unauthorized"},{status:401});
     return NextResponse.json({error:error instanceof Error?error.message:"Scan failed"},{status:500});
   }
