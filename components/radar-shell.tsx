@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
-import { Bell, Building2, Compass, FileText, LogOut, Radar, Search, Settings, Signal, Sparkles, Target, Home, Activity, LoaderCircle } from "lucide-react";
+import { Bell, Building2, Compass, FileText, LogOut, Radar, Search, Settings, Signal, Sparkles, Target, Home, Activity, LoaderCircle, BadgeIndianRupee } from "lucide-react";
 import { RadarLogo } from "@/components/radar-logo";
 import { RadarAutoSetup } from "@/components/radar-auto-setup";
 
-type MainKey = "dashboard" | "discover" | "radar" | "competitors" | "signals" | "decisions" | "briefings" | "sources" | "settings";
+type MainKey = "dashboard" | "discover" | "radar" | "competitors" | "signals" | "decisions" | "briefings" | "funding" | "sources" | "settings";
 type NavItem = { label: string; href: string; icon: LucideIcon; key: MainKey; hint: string };
 
 const primaryNav: NavItem[] = [
@@ -18,6 +18,7 @@ const primaryNav: NavItem[] = [
   { label: "Competitors", href: "/companies", icon: Building2, key: "competitors", hint: "Every direct, adjacent, substitute and emerging competitor." },
   { label: "Signals", href: "/signals", icon: Signal, key: "signals", hint: "Evidence-backed changes detected across the market." },
   { label: "Decisions", href: "/decisions", icon: Target, key: "decisions", hint: "What the evidence means and what to do next." },
+  { label: "Funding & Grants", href: "/funding", icon: BadgeIndianRupee, key: "funding", hint: "Personalized grants, accelerators and funding opportunities matched to your Company Brain." },
   { label: "Briefings", href: "/briefings", icon: FileText, key: "briefings", hint: "Daily, weekly and monthly founder intelligence summaries." },
 ];
 
@@ -31,6 +32,7 @@ function activeSection(pathname: string): MainKey | null {
   if (pathname === "/companies" || pathname.startsWith("/companies/")) return "competitors";
   if (pathname === "/signals" || pathname.startsWith("/signals/")) return "signals";
   if (["/decisions", "/actions", "/outcomes"].some(p => pathname === p || pathname.startsWith(`${p}/`))) return "decisions";
+  if (pathname === "/funding" || pathname.startsWith("/funding/")) return "funding";
   if (pathname === "/briefings" || pathname.startsWith("/briefings/")) return "briefings";
   if (pathname === "/sources" || pathname.startsWith("/sources/")) return "sources";
   if (["/settings", "/brain", "/system-health"].some(p => pathname === p || pathname.startsWith(`${p}/`))) return "settings";
@@ -56,7 +58,7 @@ export function RadarShell({ children }: { children: React.ReactNode }) {
       .then(({ok,data})=>{
         if(!alive)return;
         if(!ok){router.replace("/login");return;}
-        if(!data?.onboarding_completed || !data?.website){router.replace("/onboarding");return;}
+        if(!data?.onboarding_completed){router.replace("/onboarding");return;}
         setChecking(false);
       })
       .catch(()=>{if(alive)setChecking(false)});
@@ -103,7 +105,7 @@ export function RadarShell({ children }: { children: React.ReactNode }) {
 
       <section className="main-panel radar-reference-main">
         <header className="topbar radar-reference-topbar">
-          <Link href="/ask" style={{textDecoration:"none"}} className="command-search radar-reference-search founder-search" aria-label="Ask RADAR"><Search size={18} strokeWidth={1.8}/><span>Ask RADAR about competitors, signals or decisions...</span><kbd>⌘ K</kbd></Link>
+          <Link href="/ask" style={{textDecoration:"none"}} className="command-search radar-reference-search founder-search" aria-label="Ask RADAR"><Search size={18} strokeWidth={1.8}/><span>Ask RADAR about competitors, funding, signals or decisions...</span><kbd>⌘ K</kbd></Link>
           <div className="top-actions radar-reference-actions">
             <Link href="/signals" style={{textDecoration:"none"}} className="icon-button radar-bell" aria-label="New signals"><Bell size={18} strokeWidth={1.8}/><span className="notification-dot"/></Link>
             <div className="radar-top-divider"/>
