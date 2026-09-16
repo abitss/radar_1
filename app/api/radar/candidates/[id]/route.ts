@@ -1,9 +1,7 @@
 import { NextResponse } from "next/server";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { workspaceForRequest } from "@/lib/radar-workspace";
-
-function originOf(raw:string){try{return new URL(raw).origin}catch{return raw}}
-function domainOf(raw:string){try{return new URL(raw).hostname.replace(/^www\./,"").toLowerCase()}catch{return""}}
+import { isOfficialCompanyWebsite, radarDomain, radarOrigin } from "@/lib/radar-discovery-quality";
 
 export async function PATCH(req:Request, context:{params:Promise<{id:string}>}){
   try{
@@ -21,12 +19,12 @@ export async function PATCH(req:Request, context:{params:Promise<{id:string}>}){
     }
 
     if(action==="approve"){
-      if(candidate.entity_type==="source")return NextResponse.json({error:"This is a source lead, not a company. RADAR must resolve a real company and product before promotion."},{status:400});
+      if(candidate.entity_type==="source")return NextResponse.json({error:"This row is an evidence source, not a company. Resolve a real company before promotion."},{status:400});
       const rawWebsite=String(candidate.official_website||candidate.url||"");
-      const website=originOf(rawWebsite);
-      const domain=domainOf(website);
-      if(!domain||domain.startsWith("source:"))return NextResponse.json({error:"A verified official company website is required before promotion."},{status:400});
-      const ownDomain=domainOf(workspace.website||"");
+      const website=radarOrigin(rawWebsite);
+      const domain=radarDomain(website);
+      if(!domain||!isOfficialCompanyWebsite(website,candidate.source_page_url||candidate.url||"","company"))return NextResponse.json({error:"A verified official company website is required before promotion."},{status:400});
+      const ownDomain=radarDomain(workspace.website||"");
       if(ownDomain&&domain===ownDomain)return NextResponse.json({error:"Your own startup cannot be promoted as a competitor."},{status:400});
 
       const existing=await sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&website=eq.${encodeURIComponent(website)}&select=*&limit=1`);
@@ -36,31 +34,38 @@ export async function PATCH(req:Request, context:{params:Promise<{id:string}>}){
       const relationConfidence=Math.max(0,Math.min(100,Math.round(Number(candidate.relation_confidence||0))));
       const threat=Math.min(100,Math.round(productOverlap*.42+similarity*.43+35*.15));
       if(!competitor){
-        const created=await sbInsert("radar_competitors",{
-          workspace_id:workspace.id,
-          name:String(candidate.title||candidate.domain).trim().slice(0,100),
-          website,
-          description:candidate.related_product||candidate.description||null,
-          category:productOverlap>=75&&similarity>=60?"direct":productOverlap>=50||similarity>=50?"adjacent":productOverlap>=28||similarity>=28?"micro":"emerging",
-          similarity_score:similarity,
-          product_overlap_score:productOverlap,
-          relation_confidence:relationConfidence,
-          threat_score:threat,
-          momentum_score:35,
-          movement:"stable",
-          monitoring_preference:"monitor",
-          related_product:candidate.related_product||null,
-          relationship_reason:candidate.relationship_reason||candidate.description||null,
-          discovery_source_url:candidate.source_page_url||candidate.url||null,
-          why_it_matters:`Founder-approved competitor. ${candidate.related_product?`${candidate.title} makes ${candidate.related_product}. `:""}${candidate.relationship_reason||"RADAR found relevant product overlap."} Product overlap ${productOverlap}%; discovery confidence ${relationConfidence}%.`,
-        });
-        competitor=created[0]||null;
-      }else if(competitor.monitoring_preference!=="monitor"){
+        try{
+          const created=await sbInsert("radar_competitors",{
+            workspace_id:workspace.id,
+            name:String(candidate.title||domain).trim().slice(0,100),
+            website,
+            description:candidate.related_product||candidate.description||null,
+            category:productOverlap>=75&&similarity>=60?"direct":productOverlap>=50||similarity>=50?"adjacent":productOverlap>=28||similarity>=28?"substitute":"emerging",
+            similarity_score:similarity,
+            product_overlap_score:productOverlap,
+            relation_confidence:relationConfidence,
+            threat_score:threat,
+            momentum_score:35,
+            movement:"stable",
+            monitoring_preference:"monitor",
+            related_product:candidate.related_product||null,
+            relationship_reason:candidate.relationship_reason||candidate.description||null,
+            discovery_source_url:candidate.source_page_url||candidate.url||null,
+            why_it_matters:`Founder-approved competitor. ${candidate.related_product?`${candidate.title} makes ${candidate.related_product}. `:""}${candidate.relationship_reason||"RADAR found relevant product overlap."} Product overlap ${productOverlap}%; discovery confidence ${relationConfidence}%.`,
+          });
+          competitor=created[0]||null;
+        }catch{
+          const retry=await sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&website=eq.${encodeURIComponent(website)}&select=*&limit=1`).catch(()=>[]);
+          competitor=retry[0]||null;
+          if(!competitor)throw new Error("Competitor promotion failed.");
+        }
+      }
+      if(competitor&&competitor.monitoring_preference!=="monitor"){
         const updated=await sbUpdate("radar_competitors",`id=eq.${competitor.id}`,{monitoring_preference:"monitor",updated_at:new Date().toISOString()});
         competitor=updated[0]||competitor;
       }
-      await sbUpdate("radar_candidates",`id=eq.${candidate.id}`,{status:"promoted",updated_at:new Date().toISOString()});
-      return NextResponse.json({ok:true,competitor});
+      const updatedCandidate=await sbUpdate("radar_candidates",`id=eq.${candidate.id}`,{status:"promoted",official_website:website,url:website,domain,updated_at:new Date().toISOString()});
+      return NextResponse.json({ok:true,competitor,candidate:updatedCandidate[0]||candidate});
     }
 
     return NextResponse.json({error:"Unsupported candidate action"},{status:400});
