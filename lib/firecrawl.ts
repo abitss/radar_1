@@ -39,6 +39,23 @@ async function firecrawlRequest(path: string, body: unknown, timeoutMs = 30000) 
   return data;
 }
 
+async function firecrawlDelete(path:string,timeoutMs=20000){
+  const response=await fetch(`${FIRECRAWL_BASE}${path}`,{
+    method:"DELETE",
+    headers:{Authorization:`Bearer ${apiKey()}`,"Content-Type":"application/json"},
+    cache:"no-store",
+    signal:AbortSignal.timeout(timeoutMs),
+  });
+  const text=await response.text();
+  let data:any;
+  try{data=text?JSON.parse(text):{}}catch{data={raw:text}}
+  if(!response.ok&&response.status!==404){
+    const message=data?.error||data?.message||`Firecrawl delete failed with HTTP ${response.status}`;
+    throw new Error(message);
+  }
+  return{...data,notFound:response.status===404};
+}
+
 export type FirecrawlSearchResult = {
   title?: string;
   description?: string;
@@ -177,4 +194,9 @@ export async function scrapeCompanyProfile(url: string) {
 
 export async function createMonitor(body: unknown) {
   return firecrawlRequest("/monitor", body, 25000);
+}
+
+export async function deleteMonitor(monitorId:string){
+  if(!monitorId)return{ok:true,skipped:true};
+  return firecrawlDelete(`/monitor/${encodeURIComponent(monitorId)}`,20000);
 }
