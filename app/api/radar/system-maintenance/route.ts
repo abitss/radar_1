@@ -1,10 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { sbSelect, sbUpdate } from "@/lib/radar-db";
+import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { scheduleWorkspaceRecurringTasks } from "@/lib/radar-source-monitor";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const E2E_PROBE_KEY="prod-e2e-openrouter-2026-09-16-v1";
 
 function safeEqual(a:string,b:string){
   if(!a||!b)return false;
@@ -30,6 +32,61 @@ async function systemCall(req:Request,workspaceId:string,path:string,body?:unkno
   return{ok:res.ok,status:res.status,data};
 }
 
+async function systemCallOrigin(origin:string,workspaceId:string,path:string,body?:unknown){
+  const secret=process.env.RADAR_API_SECRET||"";
+  const res=await fetch(new URL(path,origin),{
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json",
+      "x-radar-api-key":secret,
+      "x-radar-system-workspace":workspaceId,
+    },
+    body:body===undefined?undefined:JSON.stringify(body),
+    cache:"no-store",
+  });
+  const data:any=await res.json().catch(()=>({}));
+  return{ok:res.ok,status:res.status,data};
+}
+
+async function launchOneShotProductionE2E(origin:string,workspaceId:string){
+  try{
+    const existing:any[]=await sbSelect(`radar_intelligence_events?workspace_id=eq.${encodeURIComponent(workspaceId)}&dedupe_key=eq.${encodeURIComponent(E2E_PROBE_KEY)}&select=id,title,summary,created_at&limit=1`);
+    if(existing[0])return;
+
+    const result=await systemCallOrigin(origin,workspaceId,"/api/radar/e2e-test",{runDecision:true});
+    const passed=Boolean(result.ok&&result.data?.ok);
+    const stages=Array.isArray(result.data?.stages)?result.data.stages:[];
+    const failedStage=stages.find((stage:any)=>stage?.ok===false);
+    const summary=result.data?.summary||{};
+    const detail={
+      passed,
+      http_status:result.status,
+      failed_stage:failedStage?.stage||null,
+      error:failedStage?.error||result.data?.error||null,
+      summary,
+      duration_ms:result.data?.duration_ms||null,
+      stages:stages.map((stage:any)=>({stage:stage?.stage,ok:stage?.ok,skipped:stage?.skipped||false,error:stage?.error||null})),
+    };
+
+    await sbInsert("radar_intelligence_events",{
+      workspace_id:workspaceId,
+      competitor_id:null,
+      event_type:passed?"system_e2e_pass":"system_e2e_fail",
+      severity:passed?"info":"high",
+      title:passed?"RADAR production intelligence E2E passed":"RADAR production intelligence E2E failed",
+      summary:JSON.stringify(detail).slice(0,7000),
+      source_url:origin,
+      confidence:100,
+      impact_score:passed?0:85,
+      dedupe_key:E2E_PROBE_KEY,
+      status:"new",
+      occurred_at:new Date().toISOString(),
+    });
+  }catch(error){
+    console.error("RADAR one-shot E2E probe failed to record",error instanceof Error?error.message:error);
+  }
+}
+
 export async function POST(req:Request){
   try{
     const supplied=req.headers.get("x-radar-cron-secret")||"";
@@ -53,7 +110,7 @@ export async function POST(req:Request){
       }).catch(()=>{});
     }
 
-    const workspaces:any[]=await sbSelect(`radar_workspaces?onboarding_completed=eq.true&website=not.is.null&select=id,initial_scan_status&order=updated_at.asc&limit=250`);
+    const workspaces:any[]=await sbSelect(`radar_workspaces?onboarding_completed=eq.true&website=not.is.null&select=id,name,initial_scan_status&order=updated_at.asc&limit=250`);
     await Promise.allSettled(workspaces.map((workspace:any)=>scheduleWorkspaceRecurringTasks(String(workspace.id))));
 
     const queued:any[]=await sbSelect(`radar_jobs?job_type=eq.initial_intelligence&status=eq.queued&available_at=lte.${encodeURIComponent(nowIso)}&select=*&order=priority.desc,created_at.asc&limit=3`);
@@ -80,6 +137,16 @@ export async function POST(req:Request){
       });
     }
 
+    let e2eWorkspace:any=workspaces[0]||null;
+    if(!e2eWorkspace){
+      const fallback:any[]=await sbSelect(`radar_workspaces?website=not.is.null&select=id,name,initial_scan_status&order=updated_at.desc&limit=1`);
+      e2eWorkspace=fallback[0]||null;
+    }
+    if(e2eWorkspace?.id){
+      const origin=new URL(req.url).origin;
+      void launchOneShotProductionE2E(origin,String(e2eWorkspace.id));
+    }
+
     return NextResponse.json({
       ok:true,
       at:nowIso,
@@ -88,6 +155,7 @@ export async function POST(req:Request){
       initial_jobs:initialResults,
       maintenance:maintenanceResults,
       due_workspaces_remaining:Math.max(0,allDueWorkspaceIds.length-dueWorkspaceIds.length),
+      production_e2e:{scheduled:Boolean(e2eWorkspace?.id),workspace_id:e2eWorkspace?.id||null,probe:E2E_PROBE_KEY},
     });
   }catch(error){
     return NextResponse.json({error:error instanceof Error?error.message:"System maintenance failed"},{status:500});
