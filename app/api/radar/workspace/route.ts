@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
+import { companyBrainChanged, companyBrainReadiness } from "@/lib/radar-profile";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
 export async function GET(req: Request) {
   try {
     const { workspace } = await workspaceForRequest(req, true);
     const jobs = await sbSelect(`radar_jobs?workspace_id=eq.${workspace.id}&select=*&order=created_at.desc&limit=5`);
-    return NextResponse.json({...workspace, jobs});
+    return NextResponse.json({...workspace, company_brain:companyBrainReadiness(workspace), jobs});
   } catch (error) {
     if (error instanceof Error && error.message === "UNAUTHORIZED") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     return NextResponse.json({ error: error instanceof Error ? error.message : "Workspace load failed" }, { status: 500 });
@@ -27,7 +28,7 @@ export async function PATCH(req: Request) {
     for (const key of textFields) {
       if (Object.prototype.hasOwnProperty.call(body, key)) {
         const value = body[key] == null ? null : String(body[key]).trim();
-        const max = key === "founder_goal" || key === "public_team_facts" ? 1000 : key === "problem_statement" || key === "positioning" ? 700 : 300;
+        const max = key === "founder_goal" || key === "public_team_facts" ? 1600 : key === "problem_statement" || key === "positioning" || key === "description" ? 1200 : 500;
         allowed[key] = typeof value === "string" ? value.slice(0, max) : value;
       }
     }
@@ -41,22 +42,29 @@ export async function PATCH(req: Request) {
 
     if (Object.prototype.hasOwnProperty.call(body, "onboarding_completed")) allowed.onboarding_completed = Boolean(body.onboarding_completed);
 
-    const incomingWebsite = typeof allowed.website === "string" ? allowed.website : workspace.website;
-    const websiteChanged = Boolean(incomingWebsite && incomingWebsite !== workspace.website);
+    const proposed = {...workspace,...allowed};
+    const readiness = companyBrainReadiness(proposed);
+    if(Boolean(allowed.onboarding_completed) && !readiness.ready){
+      return NextResponse.json({error:`Company Brain is incomplete. Missing: ${readiness.missing.join(", ")}.`,company_brain:readiness},{status:400});
+    }
+
+    const brainChanged = companyBrainChanged(workspace,proposed);
+    const websiteChanged = Object.prototype.hasOwnProperty.call(allowed,"website") && String(allowed.website||"") !== String(workspace.website||"");
     const onboardingCompletedNow = Boolean(allowed.onboarding_completed && !workspace.onboarding_completed);
-    if (websiteChanged || onboardingCompletedNow) {
+    if (brainChanged || websiteChanged || onboardingCompletedNow) {
       allowed.initial_scan_status = "pending";
       allowed.initial_scan_started_at = null;
       allowed.initial_scan_completed_at = null;
       allowed.initial_scan_error = null;
     }
 
-    if (!Object.keys(allowed).length) return NextResponse.json(workspace);
+    if (!Object.keys(allowed).length) return NextResponse.json({...workspace,company_brain:companyBrainReadiness(workspace)});
     allowed.updated_at = new Date().toISOString();
     const updated = await sbUpdate("radar_workspaces", `id=eq.${workspace.id}`, allowed);
-    const next = updated[0] || workspace;
+    const next = updated[0] || proposed;
+    const nextReadiness=companyBrainReadiness(next);
 
-    if ((websiteChanged || onboardingCompletedNow) && next.website) {
+    if ((brainChanged || websiteChanged || onboardingCompletedNow) && next.onboarding_completed && nextReadiness.ready) {
       const active = await sbSelect(`radar_jobs?workspace_id=eq.${workspace.id}&job_type=eq.initial_intelligence&status=in.(queued,running)&select=id&limit=1`);
       if (!active[0]) {
         await sbInsert("radar_jobs", {
@@ -64,7 +72,7 @@ export async function PATCH(req: Request) {
           job_type: "initial_intelligence",
           status: "queued",
           priority: 100,
-          payload: { website: next.website, reason: onboardingCompletedNow ? "onboarding_completed" : "website_changed" },
+          payload: { website: next.website || null, input:"company_brain", reason: onboardingCompletedNow ? "onboarding_completed" : brainChanged ? "company_brain_changed" : "website_changed" },
           current_step: "queued",
           progress: 0,
         });
@@ -72,7 +80,7 @@ export async function PATCH(req: Request) {
     }
 
     const jobs = await sbSelect(`radar_jobs?workspace_id=eq.${workspace.id}&select=*&order=created_at.desc&limit=5`);
-    return NextResponse.json({...next, jobs});
+    return NextResponse.json({...next, company_brain:nextReadiness, jobs});
   } catch (error) {
     if (error instanceof Error && error.message === "UNAUTHORIZED") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     return NextResponse.json({ error: error instanceof Error ? error.message : "Workspace update failed" }, { status: 500 });
