@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createMonitor, firecrawlConfigured } from "@/lib/firecrawl";
+import { createMonitor, deleteMonitor, firecrawlConfigured } from "@/lib/firecrawl";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
@@ -52,7 +52,10 @@ export async function POST(req:Request,context:{params:Promise<{id:string}>}){
     }catch{
       const race=await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&monitor_type=eq.entity_surveillance&status=in.(pending,active)&select=*&order=created_at.desc&limit=1`).catch(()=>[]);
       monitor=race[0]||null;
-      if(!monitor)throw new Error("Monitor was created by the provider but RADAR could not persist its local state.");
+      if(!monitor){
+        try{await deleteMonitor(String(providerId))}catch{}
+        throw new Error("Monitor was created by the provider but RADAR could not persist its local state.");
+      }
     }
 
     await sbUpdate("radar_competitors",`id=eq.${competitor.id}`,{monitoring_preference:"monitor",updated_at:new Date().toISOString()});
@@ -60,5 +63,33 @@ export async function POST(req:Request,context:{params:Promise<{id:string}>}){
   }catch(error){
     if(error instanceof Error&&error.message==="UNAUTHORIZED")return NextResponse.json({error:"Unauthorized"},{status:401});
     return NextResponse.json({error:error instanceof Error?error.message:"Could not activate competitor monitoring"},{status:500});
+  }
+}
+
+export async function DELETE(req:Request,context:{params:Promise<{id:string}>}){
+  try{
+    const {workspace}=await workspaceForRequest(req,true);
+    const {id}=await context.params;
+    const competitor=(await sbSelect(`radar_competitors?id=eq.${encodeURIComponent(id)}&workspace_id=eq.${workspace.id}&select=id,name&limit=1`))[0];
+    if(!competitor)return NextResponse.json({error:"Competitor not found"},{status:404});
+
+    const monitors=await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&competitor_id=eq.${competitor.id}&monitor_type=eq.entity_surveillance&status=in.(pending,active,error)&select=id,provider_monitor_id,status&order=created_at.desc&limit=100`).catch(()=>[]);
+    const failures:string[]=[];
+    for(const monitor of monitors){
+      if(monitor.provider_monitor_id){
+        try{await deleteMonitor(String(monitor.provider_monitor_id))}
+        catch(error){failures.push(error instanceof Error?error.message:"Provider monitor deletion failed")}
+      }
+    }
+    if(failures.length)return NextResponse.json({error:"RADAR could not safely stop every provider watch. Retry after the monitoring provider recovers.",details:failures.slice(0,3)},{status:502});
+
+    for(const monitor of monitors){
+      await sbUpdate("radar_monitors",`id=eq.${monitor.id}`,{status:"deleted",updated_at:new Date().toISOString(),last_error:null}).catch(()=>{});
+    }
+    await sbUpdate("radar_competitors",`id=eq.${competitor.id}`,{monitoring_preference:"auto",updated_at:new Date().toISOString()});
+    return NextResponse.json({ok:true,stopped:monitors.length});
+  }catch(error){
+    if(error instanceof Error&&error.message==="UNAUTHORIZED")return NextResponse.json({error:"Unauthorized"},{status:401});
+    return NextResponse.json({error:error instanceof Error?error.message:"Could not stop competitor monitoring"},{status:500});
   }
 }
