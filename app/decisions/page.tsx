@@ -11,17 +11,18 @@ function pct(v:any){return `${Math.round(Number(v||0))}%`}
 function when(raw?:string|null){if(!raw)return"never";const ms=Math.max(0,Date.now()-new Date(raw).getTime());const min=Math.floor(ms/60000);if(min<1)return"just now";if(min<60)return`${min}m ago`;const h=Math.floor(min/60);if(h<24)return`${h}h ago`;return`${Math.floor(h/24)}d ago`}
 
 export default function DecisionsPage(){
-  const[rows,setRows]=useState<any[]>([]),[moves,setMoves]=useState<any[]>([]),[loading,setLoading]=useState(true),[busy,setBusy]=useState(""),[message,setMessage]=useState(""),[error,setError]=useState("");
+  const[rows,setRows]=useState<any[]>([]),[moves,setMoves]=useState<any[]>([]),[signals,setSignals]=useState<any[]>([]),[loading,setLoading]=useState(true),[busy,setBusy]=useState(""),[message,setMessage]=useState(""),[error,setError]=useState("");
   const[filter,setFilter]=useState<FilterKey>("all"),[query,setQuery]=useState("");
   const[founderQuestion,setFounderQuestion]=useState("");
 
   async function load(silent=false){
     try{
-      const[dRes,mRes]=await Promise.all([fetch("/api/radar/decisions",{cache:"no-store"}),fetch("/api/radar/moves",{cache:"no-store"})]);
-      const[d,m]=await Promise.all([dRes.json(),mRes.json()]);
+      const[dRes,mRes,sRes]=await Promise.all([fetch("/api/radar/decisions",{cache:"no-store"}),fetch("/api/radar/moves",{cache:"no-store"}),fetch("/api/radar/signals",{cache:"no-store"})]);
+      const[d,m,s]=await Promise.all([dRes.json(),mRes.json(),sRes.json()]);
       if(!dRes.ok)throw new Error(d.error||"Could not load decisions");
       if(!mRes.ok)throw new Error(m.error||"Could not load strategic moves");
-      setRows(Array.isArray(d)?d:[]);setMoves(Array.isArray(m)?m:[]);setError("");
+      if(!sRes.ok)throw new Error(s.error||"Could not load signals");
+      setRows(Array.isArray(d)?d:[]);setMoves(Array.isArray(m)?m:[]);setSignals(Array.isArray(s)?s:[]);setError("");
     }catch(e){if(!silent)setError(e instanceof Error?e.message:"Could not load decisions")}finally{if(!silent)setLoading(false)}
   }
   useEffect(()=>{load();const timer=window.setInterval(()=>load(true),10000);const focus=()=>load(true);window.addEventListener("focus",focus);return()=>{window.clearInterval(timer);window.removeEventListener("focus",focus)}},[]);
@@ -79,7 +80,7 @@ export default function DecisionsPage(){
   const decisionMoveIds=useMemo(()=>new Set(rows.filter(r=>r.status!=="dismissed").map(r=>String(r.move_id||"")).filter(Boolean)),[rows]);
   const decisionSignalIds=useMemo(()=>new Set(rows.filter(r=>r.status!=="dismissed").map(r=>String(r.source_signal_id||"")).filter(Boolean)),[rows]);
   const availableMoves=useMemo(()=>moves.filter(m=>["watching","confirmed"].includes(m.status)&&!decisionMoveIds.has(String(m.id))),[moves,decisionMoveIds]);
-  const availableSignals=useMemo(()=>rows.length||moves.length?[]:[],[rows,moves]);
+  const availableSignals=useMemo(()=>signals.filter(s=>s.status!=="archived"&&!decisionSignalIds.has(String(s.id))).sort((a,b)=>Number(b.impact_score||0)-Number(a.impact_score||0)).slice(0,6),[signals,decisionSignalIds]);
   const stats=useMemo(()=>({
     open:rows.filter(r=>r.status==="open").length,
     high:rows.filter(r=>Number(r.move?.impact_score||0)>=75&&r.status==="open").length,
@@ -106,6 +107,8 @@ export default function DecisionsPage(){
     </section>
 
     <section className="metrics-grid"><div className="stat-tile"><span>Open</span><strong>{stats.open}</strong><small>Needs founder review</small></div><div className="stat-tile"><span>High impact</span><strong>{stats.high}</strong><small>Move impact ≥75</small></div><div className="stat-tile"><span>Decided</span><strong>{stats.decided}</strong><small>Response selected</small></div><div className="stat-tile"><span>Outcomes</span><strong>{stats.outcomes}</strong><small>Learning loop closed</small></div></section>
+
+    {availableSignals.length?<section className="panel decision-inbox"><div className="decision-inbox-head"><div><span>SIGNAL DECISIONS</span><h2>{availableSignals.length} Signal{availableSignals.length===1?"":"s"} can become a decision now</h2><p>Use this when a single verified Signal matters enough to review before RADAR has enough cross-signal evidence to form a Move.</p></div><CircleAlert size={20}/></div><div className="decision-move-grid">{availableSignals.map(s=><div key={s.id} className="decision-move-row"><div><strong>{s.title}</strong><span>{s.competitor?.name||"Market signal"} · {pct(s.impact_score)} impact · {pct(s.confidence)} confidence · {s.signal_type}</span></div><button className="secondary-button" disabled={busy===`signal:${s.id}`} onClick={()=>createFromSignal(s.id)}>{busy===`signal:${s.id}`?<LoaderCircle size={13}/>:<CircleAlert size={13}/>}Create decision</button></div>)}</div></section>:null}
 
     {availableMoves.length?<section className="panel decision-inbox"><div className="decision-inbox-head"><div><span>DECISION INBOX</span><h2>{availableMoves.length} strategic Move{availableMoves.length===1?"":"s"} ready for founder review</h2><p>These Moves have enough evidence to become a decision memo but do not yet have an active Decision.</p></div><Target size={20}/></div><div className="decision-move-grid">{availableMoves.slice(0,6).map(m=><div key={m.id} className="decision-move-row"><div><strong>{m.title}</strong><span>{m.competitor?.name||"Market move"} · {pct(m.impact_score)} impact · {pct(m.confidence)} confidence · {m.signal_count||0} signals</span></div><button className="secondary-button" disabled={busy===`move:${m.id}`} onClick={()=>createFromMove(m.id)}>{busy===`move:${m.id}`?<LoaderCircle size={13}/>:<Target size={13}/>}Create decision</button></div>)}</div></section>:null}
 
