@@ -7,6 +7,8 @@ function hasKey(provider:string){
   if(provider==="tavily")return Boolean(process.env.TAVILY_API_KEY);
   if(provider==="brave")return Boolean(process.env.BRAVE_SEARCH_API_KEY);
   if(provider==="serper")return Boolean(process.env.SERPER_API_KEY);
+  if(provider==="searxng")return Boolean(process.env.SEARXNG_BASE_URL);
+  if(provider==="gdelt")return String(process.env.GDELT_ENABLED||"true").toLowerCase()!=="false";
   return false;
 }
 
@@ -37,12 +39,12 @@ function dedupe(items:EngineSearchResult[]){
 export function configuredEngineSearchProvider(){
   const requested=String(process.env.SEARCH_PROVIDER||"auto").toLowerCase();
   if(requested&&requested!=="auto")return hasKey(requested)?requested:null;
-  for(const provider of ["tavily","brave","serper","openrouter"])if(hasKey(provider))return provider;
+  for(const provider of ["searxng","tavily","brave","serper","openrouter"])if(hasKey(provider))return provider;
   return null;
 }
 
 export function engineSearchConfigured(){
-  return Boolean(configuredEngineSearchProvider()||process.env.OPENROUTER_API_KEY);
+  return Boolean(configuredEngineSearchProvider()||process.env.OPENROUTER_API_KEY||String(process.env.GDELT_ENABLED||"true").toLowerCase()!=="false");
 }
 
 export async function engineSearchWeb(query:string,maxResults=8):Promise<EngineSearchResult[]>{
@@ -50,12 +52,14 @@ export async function engineSearchWeb(query:string,maxResults=8):Promise<EngineS
   const supplemental=Boolean(process.env.OPENROUTER_API_KEY)&&String(process.env.OPENROUTER_LIVE_WEB_ENABLED||"true").toLowerCase()!=="false";
   const tasks:Promise<EngineSearchResult[]>[]=[];
 
-  if(provider==="tavily")tasks.push(searchTavily(query,maxResults));
+  if(provider==="searxng")tasks.push(searchSearxng(query,maxResults));
+  else if(provider==="tavily")tasks.push(searchTavily(query,maxResults));
   else if(provider==="brave")tasks.push(searchBrave(query,maxResults));
   else if(provider==="serper")tasks.push(searchSerper(query,maxResults));
   else if(provider==="openrouter")tasks.push(searchOpenRouter(query,maxResults));
 
-  if(supplemental&&provider!=="openrouter")tasks.push(searchOpenRouter(query,Math.min(maxResults,8)));
+  if(String(process.env.GDELT_ENABLED||"true").toLowerCase()!=="false")tasks.push(searchGdelt(query,Math.min(maxResults,8)));
+  if(supplemental&&provider!=="openrouter")tasks.push(searchOpenRouter(query,Math.min(maxResults,6)));
   if(!tasks.length)return[];
 
   const settled=await Promise.allSettled(tasks);
@@ -120,4 +124,37 @@ async function searchSerper(query:string,maxResults:number){
   if(!response.ok)throw new Error(`Serper search failed (${response.status})`);
   const data:any=await response.json();
   return(data.organic||[]).map((r:any)=>({title:String(r.title||r.link||""),url:String(r.link||""),description:String(r.snippet||""),score:0,provider:"serper"}));
+}
+
+
+async function searchSearxng(query:string,maxResults:number):Promise<EngineSearchResult[]>{
+  const base=String(process.env.SEARXNG_BASE_URL||"").replace(/\/$/,"");
+  if(!base)return[];
+  const url=`${base}/search?q=${encodeURIComponent(query)}&format=json&language=all&safesearch=1`;
+  const response=await fetch(url,{headers:{accept:"application/json","user-agent":"RADAR/1.0"},signal:AbortSignal.timeout(Number(process.env.SEARCH_TIMEOUT_MS||30000)),cache:"no-store"});
+  if(!response.ok)throw new Error(`SearXNG search failed (${response.status})`);
+  const data:any=await response.json();
+  return (Array.isArray(data?.results)?data.results:[]).slice(0,maxResults).map((r:any,index:number)=>({
+    title:String(r.title||r.url||"").slice(0,240),
+    url:String(r.url||""),
+    description:String(r.content||r.description||"").replace(/\s+/g," ").trim().slice(0,2400),
+    score:Number.isFinite(Number(r.score))?Number(r.score):Math.max(.35,1-index*.04),
+    provider:"searxng",
+  })).filter((r:EngineSearchResult)=>Boolean(r.url));
+}
+
+async function searchGdelt(query:string,maxResults:number):Promise<EngineSearchResult[]>{
+  const endpoint="https://api.gdeltproject.org/api/v2/doc/doc";
+  const params=new URLSearchParams({query,mode:"artlist",maxrecords:String(Math.min(250,Math.max(5,maxResults))),format:"json",sort:"hybridrel"});
+  const response=await fetch(`${endpoint}?${params.toString()}`,{headers:{accept:"application/json","user-agent":"RADAR/1.0"},signal:AbortSignal.timeout(Number(process.env.SEARCH_TIMEOUT_MS||30000)),cache:"no-store"});
+  if(!response.ok)return[];
+  const data:any=await response.json().catch(()=>({}));
+  const rows=Array.isArray(data?.articles)?data.articles:[];
+  return rows.slice(0,maxResults).map((r:any,index:number)=>({
+    title:String(r.title||r.url||"").slice(0,240),
+    url:String(r.url||""),
+    description:String([r.seendate,r.domain,r.sourcecountry,r.language].filter(Boolean).join(" · ")).slice(0,1200),
+    score:Math.max(.3,.9-index*.04),
+    provider:"gdelt",
+  })).filter((r:EngineSearchResult)=>Boolean(r.url));
 }
