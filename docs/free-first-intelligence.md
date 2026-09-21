@@ -16,7 +16,7 @@ The existing Company Brain → discovery → evidence → Signals → Moves rout
 
 ## Database
 
-No migration is required or applied. Inspected the existing source-health columns, unique `(workspace_id,url)`, `(workspace_id,task_key)`, and `(workspace_id,fingerprint)` indexes, and funding defaults. No tables or existing workspace data were reset.
+The first code release required no migration. A follow-up migration is now prepared but NOT applied: `supabase/migrations/20260921124207_radar_server_policy_alignment.sql`. Automatic approval review rejected the production security-boundary change, so explicit user approval is required. Inspected the existing source-health columns, unique `(workspace_id,url)`, `(workspace_id,task_key)`, and `(workspace_id,fingerprint)` indexes, and funding defaults. No tables or existing workspace data were reset.
 
 ## Environment
 
@@ -33,3 +33,13 @@ The browser reached RADAR's sign-in page; authenticated discovery, funding persi
 Free Render services may sleep. The in-process maintenance driver cannot run while asleep. An external authenticated POST to `/api/radar/system-maintenance` is needed to wake it for continuous operation, or an always-on plan. No paid service was created.
 
 Search cache, GDELT pacing, and feed-discovery cooldown are process-local. Multi-instance deployment needs shared coordination. Existing Move synthesis remains heuristic; this change adds recency/confidence filtering, not AI-based synthesis. The broader legacy app has not received a complete authorization or transaction audit. Provider health reflects recent checks by the current process; it is not a historical uptime metric.
+
+## Follow-up findings
+
+Production logs showed the old automatic E2E probe repeatedly launching full scans because its result insert failed under RLS. This automatic probe has been removed; the explicit authenticated E2E endpoint remains available.
+
+The pending migration changes existing policies on `radar_alert_preferences`, `radar_briefings`, `radar_feedback`, `radar_intelligence_events`, and `radar_jobs` to derive authorization from the existing server-secret-protected workspace policy. It enables RLS on `radar_recurring_tasks` with the same workspace visibility predicate. The app uses Supabase's `anon` database role server-side; this migration changes a production authorization boundary and has not been applied.
+
+Secure browser sign-in was also rejected by automatic approval review pending explicit authorization to access the private RADAR account. No sign-in occurred.
+
+Latest local verification: production build and 10 regression tests passed. Render confirmed both code commits `085925c` and `50a5931` live. Live GDELT requests from Render also showed connection timeouts.
