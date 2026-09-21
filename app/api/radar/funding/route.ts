@@ -134,7 +134,7 @@ export async function GET(req:Request){
     ]);
     return NextResponse.json({
       ok:true,configured:radarEngineAIConfigured(),company_brain:companyBrainReadiness(workspace),profile:companyBrainSummary(workspace),
-      preferences:prefs[0]||null,opportunities:opportunities.map(serialize),stats:stats(opportunities),scans,last_scan:scans[0]||null
+      preferences:prefs[0]?{...prefs[0],geography:compactGeo(prefs[0].geography||workspace.geography||workspace.founder_country||""),funding_goal:cleanFundingGoal(prefs[0].funding_goal,workspace.founder_goal)}:null,opportunities:opportunities.map(serialize),stats:stats(opportunities),scans,last_scan:scans[0]||null
     });
   }catch(error){
     if(error instanceof Error&&error.message==="UNAUTHORIZED")return NextResponse.json({error:"Unauthorized"},{status:401});
