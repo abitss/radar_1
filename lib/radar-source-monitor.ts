@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { scrapeUrl } from "@/lib/firecrawl";
-import { fetchSnapshotEngine } from "@/lib/radar-engine-crawl";
+import { scrapeUrl, firecrawlConfigured } from "@/lib/firecrawl";
+import { discoverFeedUrls, fetchSnapshotEngine } from "@/lib/radar-engine-crawl";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { analyzeSemanticChange, normalizeSnapshotText } from "@/lib/radar-semantic";
 import { detectMovesForWorkspace } from "@/lib/radar-moves";
@@ -32,6 +32,16 @@ export async function ensureWorkspaceSources(workspaceId:string){
       rows.push({workspace_id:workspaceId,competitor_id:c.id,url:s.url,title:s.title,source_type:s.type,reliability:s.reliability,priority:s.priority,check_frequency_minutes:s.freq,status:"active",health:"unknown",next_check_at:new Date().toISOString()});
     }
   }
+  const topWithWebsites=competitors.filter((c:any)=>c.monitoring_preference!=="ignore"&&c.website).slice(0,24);
+  const feedResults=await Promise.allSettled(topWithWebsites.map(async(c:any)=>({c,feeds:await discoverFeedUrls(c.website)})));
+  for(const item of feedResults){
+    if(item.status!=="fulfilled")continue;
+    for(const feed of item.value.feeds.slice(0,3)){
+      if(known.has(feed))continue;
+      known.add(feed);
+      rows.push({workspace_id:workspaceId,competitor_id:item.value.c.id,url:feed,title:`${item.value.c.name} feed`,source_type:"rss",reliability:92,priority:Math.max(55,Number(item.value.c.threat_score||0)),check_frequency_minutes:60,status:"active",health:"unknown",next_check_at:new Date().toISOString()});
+    }
+  }
   if(rows.length)await sbInsert("radar_sources",rows);
   return{added:rows.length};
 }
@@ -42,6 +52,8 @@ async function fetchCurrentSnapshot(url:string){
     const text=normalizeSnapshotText(direct.text||"");
     if(text.length>=80)return{text,contentHash:direct.hash||hash(text),title:direct.title||"",url:direct.url||url,provider:"direct"};
   }catch{}
+  const allowFirecrawl=firecrawlConfigured()&&String(process.env.FIRECRAWL_FALLBACK_ENABLED||"false").toLowerCase()==="true";
+  if(!allowFirecrawl)throw new Error("Direct source fetch failed and premium crawler fallback is disabled");
   const page=await scrapeUrl(url);
   const text=normalizeSnapshotText(page.markdown||"");
   if(!text||text.length<80)throw new Error("Source returned too little meaningful text");
