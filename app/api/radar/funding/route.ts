@@ -4,6 +4,7 @@ import { searchWebFast } from "@/lib/firecrawl";
 import { radarEngineAIConfigured, radarEngineJson } from "@/lib/radar-engine-ai";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { companyBrainReadiness, companyBrainSummary } from "@/lib/radar-profile";
+import { conciseDiscoveryTerms, cleanDiscoveryQuery } from "@/lib/radar-discovery-quality";
 import { workspaceForRequest } from "@/lib/radar-workspace";
 
 export const runtime="nodejs";
@@ -13,9 +14,19 @@ type FundingType="grant"|"equity"|"accelerator"|"challenge"|"incubator"|"loan"|"
 type FundingStatus="open"|"upcoming"|"rolling"|"unknown"|"closed";
 type PipelineStatus="new"|"saved"|"preparing"|"applied"|"interview"|"awarded"|"rejected"|"ignored";
 
-function terms(value:unknown){
-  if(Array.isArray(value))return value.map(String).map(x=>x.trim()).filter(Boolean);
-  return String(value||"").split(/[,;|\n]/).map(x=>x.trim()).filter(Boolean);
+function terms(value:unknown){return conciseDiscoveryTerms(value,24)}
+function compactGeo(value:unknown){
+  const raw=String(value||"").replace(/\s+/g," ").trim();
+  if(!raw)return"";
+  const first=raw.split(/[.;]/)[0].trim();
+  return (first||raw).slice(0,80);
+}
+function cleanFundingGoal(value:unknown,founderGoal:unknown){
+  const raw=String(value||"").replace(/\s+/g," ").trim().slice(0,400);
+  if(!raw)return"";
+  if(raw===String(founderGoal||"").replace(/\s+/g," ").trim().slice(0,400))return"";
+  if(/competitor|competitive|market white space|pricing changes|school partnerships|technology trends/i.test(raw)&&!/grant|fund|raise|capital|seed|equity|non-dilutive|investment/i.test(raw))return"";
+  return raw;
 }
 function clamp(value:unknown,fallback=0){const n=Number(value);return Number.isFinite(n)?Math.max(0,Math.min(100,Math.round(n))):fallback}
 function cleanArray(value:unknown,max=8){
@@ -52,10 +63,10 @@ function buildQueries(workspace:any,preferences:any){
   const product=terms(workspace.product_keywords).slice(0,4);
   const tech=terms(workspace.technology_keywords).slice(0,4);
   const industry=terms(`${workspace.industry||""},${workspace.sub_category||""}`).slice(0,3);
-  const geography=String(preferences?.geography||workspace.geography||workspace.founder_country||"").trim();
-  const stage=String(preferences?.stage||"").trim();
+  const geography=compactGeo(preferences?.geography||workspace.geography||workspace.founder_country||"");
+  const stage=String(preferences?.stage||"").replace(/\s+/g," ").trim().slice(0,60);
   const q=new Set<string>();
-  const core=[...industry,...product].slice(0,4).join(" ");
+  const core=[...industry,...product].filter(Boolean).slice(0,4).join(" ");
   if(core){
     q.add(`${core} startup grant open call ${geography}`.trim());
     q.add(`${core} startup funding program accelerator ${geography}`.trim());
@@ -73,7 +84,7 @@ function buildQueries(workspace:any,preferences:any){
   }
   if(stage)q.add(`${stage} startup funding grant accelerator ${geography} ${industry[0]||""}`.trim());
   q.add(`startup non dilutive funding grants open applications ${core} ${geography}`.trim());
-  return [...q].filter(x=>x.length>8).slice(0,10);
+  return [...q].map(x=>cleanDiscoveryQuery(x,180)).filter(Boolean).slice(0,10);
 }
 async function collectEvidence(queries:string[]){
   const settled=await Promise.allSettled(queries.map(async query=>({query,rows:await searchWebFast(query,8)})));
@@ -144,8 +155,8 @@ export async function POST(req:Request){
     const preferences={
       type:["all","grant","equity","accelerator","challenge","incubator","loan","other"].includes(requestedType)?requestedType:"all",
       stage:String(body?.stage||"").trim().slice(0,100),
-      geography:String(body?.geography||"").trim().slice(0,120),
-      funding_goal:String(body?.funding_goal||"").trim().slice(0,400),
+      geography:compactGeo(body?.geography||workspace.geography||workspace.founder_country||""),
+      funding_goal:cleanFundingGoal(body?.funding_goal,workspace.founder_goal),
       include_closed:Boolean(body?.include_closed)
     };
     const existingPref=await sbSelect(`radar_funding_preferences?workspace_id=eq.${workspace.id}&select=workspace_id&limit=1`).catch(()=>[]);
