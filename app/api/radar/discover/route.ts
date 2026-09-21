@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
-import { firecrawlConfigured, searchWebFast } from "@/lib/firecrawl";
-import { engineSearchConfigured } from "@/lib/radar-engine-search";
+import { engineSearchConfigured, engineSearchWeb } from "@/lib/radar-engine-search";
 import { analyzeDiscoveryResults, radarAIConfigured } from "@/lib/radar-ai";
 import { ensureCompanyBrainExpansion } from "@/lib/radar-brain-expansion";
 import { companyBrainReadiness } from "@/lib/radar-profile";
@@ -75,11 +74,9 @@ function baseQueries(workspace:any){
   return [...q].map(x=>cleanDiscoveryQuery(x)).filter(Boolean).slice(0,8);
 }
 
-// searchWebFast already combines Firecrawl and the configured engine-search provider.
-// Calling engineSearchWeb again here previously doubled provider traffic and contributed to rate-limit storms.
+// Free-first discovery: self-hosted SearXNG + GDELT, with optional OpenRouter live-web enrichment.
 async function searchAll(query:string,limit=6){
-  const rows=await searchWebFast(query,limit);
-  return rows.map((r:any)=>({...r,provider:r.provider||"firecrawl"}));
+  return engineSearchWeb(query,limit);
 }
 
 async function searchQueries(queries:string[]){
@@ -158,8 +155,8 @@ export async function GET(req:Request){
     });
     const running=recentRuns.find((r:any)=>r.status==="running")||null;
     return NextResponse.json({
-      configured:firecrawlConfigured()||engineSearchConfigured(),
-      firecrawl:firecrawlConfigured(),
+      configured:engineSearchConfigured(),
+      searxng:Boolean(process.env.SEARXNG_BASE_URL),gdelt:String(process.env.GDELT_ENABLED||"true").toLowerCase()!=="false",
       live_search:engineSearchConfigured(),
       ai:radarAIConfigured(),
       company_brain:companyBrainReadiness(workspace),
@@ -184,7 +181,7 @@ export async function POST(req:Request){
     const {workspace}=await workspaceForRequest(req,true);
     const readiness=companyBrainReadiness(workspace);
     if(!readiness.ready)return NextResponse.json({error:`Complete the Company Brain first. Missing: ${readiness.missing.join(", ")}.`,company_brain:readiness},{status:400});
-    if(!firecrawlConfigured()&&!engineSearchConfigured())return NextResponse.json({error:"No public-web search provider is configured."},{status:503});
+    if(!engineSearchConfigured())return NextResponse.json({error:"No public-web search provider is configured."},{status:503});
     const body=await req.json().catch(()=>({}));
 
     const activeCutoff=new Date(Date.now()-10*60*1000).toISOString();
@@ -230,7 +227,7 @@ export async function POST(req:Request){
     if(!deduped.length){
       if(existingCandidates.length||existingCompetitors.length){
         await sbUpdate("radar_scan_runs",`id=eq.${run.id}`,{status:"completed",pages_scanned:0,findings:0,error:"No new public-web results were returned; existing intelligence was preserved.",finished_at:new Date().toISOString()});
-        return NextResponse.json({ok:true,degraded:true,error:"Search providers returned no new public-web results; existing intelligence was preserved.",search:{firecrawl:firecrawlConfigured(),live_search:engineSearchConfigured()},queries_generated:queries.length,searches_succeeded:searchResult.succeeded,searches_failed:searchResult.failed,inspected:0,candidates_found:0,source_leads_found:0,promoted:0,existing_candidates:existingCandidates.length,existing_competitors:existingCompetitors.length});
+        return NextResponse.json({ok:true,degraded:true,error:"Search providers returned no new public-web results; existing intelligence was preserved.",search:{searxng:Boolean(process.env.SEARXNG_BASE_URL),gdelt:String(process.env.GDELT_ENABLED||"true").toLowerCase()!=="false",live_search:engineSearchConfigured()},queries_generated:queries.length,searches_succeeded:searchResult.succeeded,searches_failed:searchResult.failed,inspected:0,candidates_found:0,source_leads_found:0,promoted:0,existing_candidates:existingCandidates.length,existing_competitors:existingCompetitors.length});
       }
       throw new Error("Configured search providers returned no public-web results for the current Company Brain.");
     }
@@ -413,7 +410,7 @@ export async function POST(req:Request){
 
     return NextResponse.json({
       ok:true,
-      search:{firecrawl:firecrawlConfigured(),live_search:engineSearchConfigured()},
+      search:{searxng:Boolean(process.env.SEARXNG_BASE_URL),gdelt:String(process.env.GDELT_ENABLED||"true").toLowerCase()!=="false",live_search:engineSearchConfigured()},
       company_brain_expansion:{used:Boolean(aiQueries.length),cached:Boolean(expansion?.cached),provider:expansion?.provider||null,model:expansion?.model||null,queries:aiQueries.length,error:expansion?.error||null},
       queries_generated:queries.length,
       searches_succeeded:searchResult.succeeded,
