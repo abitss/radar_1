@@ -64,8 +64,15 @@ export type FirecrawlSearchResult = {
 };
 
 function searchRows(payload: any): FirecrawlSearchResult[] {
-  const rows = payload?.data?.web || payload?.web || [];
-  return Array.isArray(rows) ? rows.filter((row) => row?.url) : [];
+  const direct = Array.isArray(payload?.data) ? payload.data : null;
+  const rows = direct || payload?.data?.web || payload?.web || payload?.results || [];
+  if(!Array.isArray(rows))return[];
+  return rows.map((row:any)=>({
+    title:String(row?.title||row?.metadata?.title||""),
+    description:String(row?.description||row?.snippet||row?.markdown||row?.metadata?.description||""),
+    url:String(row?.url||row?.link||row?.metadata?.sourceURL||row?.metadata?.url||""),
+    markdown:row?.markdown?String(row.markdown):undefined,
+  })).filter((row:any)=>row.url);
 }
 
 function mergeSearchRows(primary:FirecrawlSearchResult[],secondary:FirecrawlSearchResult[],limit:number){
