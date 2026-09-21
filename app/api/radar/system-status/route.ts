@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { firecrawlConfigured } from "@/lib/firecrawl";
 import { engineSearchConfigured } from "@/lib/radar-engine-search";
 import { radarEngineAIStatus } from "@/lib/radar-engine-ai";
 import { companyBrainReadiness } from "@/lib/radar-profile";
@@ -71,7 +70,7 @@ export async function GET(req: Request) {
       company_brain:brain,
       website:{configured:Boolean(workspace.website),role:"optional_enrichment"},
       ai,
-      search:{configured:firecrawlConfigured()||engineSearchConfigured(),firecrawl:firecrawlConfigured(),engine:engineSearchConfigured()},
+      search:{configured:engineSearchConfigured(),searxng:Boolean(process.env.SEARXNG_BASE_URL),gdelt:String(process.env.GDELT_ENABLED||"true").toLowerCase()!=="false",engine:engineSearchConfigured(),firecrawl_fallback:String(process.env.FIRECRAWL_FALLBACK_ENABLED||"false").toLowerCase()==="true"},
       monitoring:{
         active:schedulingActive,
         provider_monitor:Boolean(discovery),
