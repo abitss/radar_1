@@ -10,6 +10,7 @@ import "./navigation-simplify.css";
 import "./founder-os.css";
 import "./functional-radar.css";
 import "./dashboard-fixes.css";
+import "./funding/funding.css";
 
 export const metadata: Metadata = {
   title: "RADAR | Continuous Competitive Intelligence for Founders",
