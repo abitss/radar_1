@@ -122,10 +122,15 @@ async function callOpenRouter(prompt:string,options:EngineAiOptions):Promise<Eng
   };
   if(options.json)body.response_format={type:"json_object"};
   if(options.web){
-    body.tools=[
-      {type:"openrouter:web_search",parameters:{engine:String(process.env.OPENROUTER_WEB_ENGINE||"auto"),max_results:Math.max(5,Math.min(20,Number(process.env.OPENROUTER_WEB_MAX_RESULTS||10))) }},
-      {type:"openrouter:web_fetch",parameters:{engine:String(process.env.OPENROUTER_FETCH_ENGINE||"openrouter"),max_content_tokens:Math.max(4000,Math.min(30000,Number(process.env.OPENROUTER_FETCH_MAX_TOKENS||12000))) }},
-    ];
+    const maxResults=Math.max(5,Math.min(20,Number(process.env.OPENROUTER_WEB_MAX_RESULTS||10)));
+    if(String(options.feature||"").toLowerCase().includes("live_web_discovery")){
+      body.plugins=[{id:"web",max_results:maxResults}];
+    }else{
+      body.tools=[
+        {type:"openrouter:web_search",parameters:{engine:String(process.env.OPENROUTER_WEB_ENGINE||"auto"),max_results:maxResults}},
+        {type:"openrouter:web_fetch",parameters:{engine:String(process.env.OPENROUTER_FETCH_ENGINE||"openrouter"),max_content_tokens:Math.max(4000,Math.min(30000,Number(process.env.OPENROUTER_FETCH_MAX_TOKENS||12000))) }},
+      ];
+    }
   }
   const data=await openRouterRequest(body,Number(process.env.AI_TIMEOUT_MS||75000));
   const text=String(data?.choices?.[0]?.message?.content||"");
