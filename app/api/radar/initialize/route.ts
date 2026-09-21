@@ -64,10 +64,8 @@ export async function POST(req:Request){
     steps.push({step:"deep_scan",ok:true,requested:scanTargets.length,completed:scanned});
 
     await progress("competitor_monitoring",70);
-    const monitorTargets=(await sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&select=*&order=threat_score.desc,product_overlap_score.desc&limit=5`)).filter((c:any)=>c.website);
-    const monitorResults=await Promise.allSettled(monitorTargets.map((c:any)=>callInternal(req,`/api/radar/competitors/${c.id}/monitor`)));
-    const monitors=monitorResults.filter((r:any)=>r.status==="fulfilled"&&r.value.res.ok).length;
-    steps.push({step:"competitor_monitoring",ok:true,requested:monitorTargets.length,activated:monitors});
+    const monitorTargets=(await sbSelect(`radar_competitors?workspace_id=eq.${workspace.id}&select=id,website&order=threat_score.desc,product_overlap_score.desc&limit=5`)).filter((c:any)=>c.website);
+    steps.push({step:"competitor_monitoring",ok:true,requested:monitorTargets.length,activated:0,mode:"local_recurring",provider_monitoring_skipped:true,reason:"Provider monitors are opt-in; RADAR recurring source checks remain active without consuming Firecrawl monitor quota."});
 
     await progress("continuous_discovery",84);
     const continuous=await callInternal(req,"/api/radar/continuous");
