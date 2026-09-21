@@ -116,3 +116,11 @@ export function sourceTypeForUrl(url:string){
   if(p.includes("docs"))return"docs";
   return"website";
 }
+
+
+export async function discoverFeedUrls(inputUrl:string){
+  const base=normalizeEngineUrl(inputUrl);
+  const page=await fetchPage(base.toString());
+  const canonical=normalizeEngineUrl(page.url||base.toString());
+  return extractFeeds(page.raw,canonical.toString());
+}
