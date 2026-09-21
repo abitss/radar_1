@@ -93,7 +93,7 @@ async function collectEvidence(queries:string[]){
     if(item.status!=="fulfilled")continue;
     for(const row of item.value.rows){
       const url=String(row?.url||"");if(!url||map.has(url))continue;
-      map.set(url,{id:`e${map.size+1}`,query:item.value.query,title:String(row?.title||domain(url)||"Source").slice(0,240),description:String(row?.description||row?.markdown||"").replace(/\s+/g," ").trim().slice(0,1600),url});
+      map.set(url,{id:`e${map.size+1}`,query:item.value.query,title:String(row?.title||domain(url)||"Source").slice(0,240),description:String(row?.description||"").replace(/\s+/g," ").trim().slice(0,1600),url});
       if(map.size>=80)break;
     }
     if(map.size>=80)break;
