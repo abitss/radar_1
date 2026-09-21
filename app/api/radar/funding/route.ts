@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { searchWebFast } from "@/lib/firecrawl";
+import { engineSearchWeb } from "@/lib/radar-engine-search";
 import { radarEngineAIConfigured, radarEngineJson } from "@/lib/radar-engine-ai";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
 import { companyBrainReadiness, companyBrainSummary } from "@/lib/radar-profile";
@@ -87,7 +87,7 @@ function buildQueries(workspace:any,preferences:any){
   return [...q].map(x=>cleanDiscoveryQuery(x,180)).filter(Boolean).slice(0,10);
 }
 async function collectEvidence(queries:string[]){
-  const settled=await Promise.allSettled(queries.map(async query=>({query,rows:await searchWebFast(query,8)})));
+  const settled=await Promise.allSettled(queries.map(async query=>({query,rows:await engineSearchWeb(query,8)})));
   const map=new Map<string,any>();
   for(const item of settled){
     if(item.status!=="fulfilled")continue;
