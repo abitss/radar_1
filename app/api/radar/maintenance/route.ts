@@ -1,3 +1,4 @@
+import { publicRadarError } from "@/lib/radar-errors";
 import { NextResponse } from "next/server";
 import { sbSelect, sbUpdate } from "@/lib/radar-db";
 import { runWorkspaceSourceMonitor, scheduleWorkspaceRecurringTasks } from "@/lib/radar-source-monitor";
@@ -21,6 +22,8 @@ export async function POST(req:Request){
     const tasks=await sbSelect(`radar_recurring_tasks?workspace_id=eq.${workspace.id}&next_run_at=lte.${encodeURIComponent(now)}&select=*&order=next_run_at.asc&limit=20`);
     const result:any={source_monitor:null,discovery:null,market_refresh:null,daily_briefing:null,weekly_briefing:null,tasks_processed:0,tasks_failed:0};
     for(const task of tasks){
+      const claim=await sbUpdate("radar_recurring_tasks",`workspace_id=eq.${workspace.id}&task_key=eq.${encodeURIComponent(task.task_key)}&next_run_at=eq.${encodeURIComponent(task.next_run_at)}`,{next_run_at:new Date(Date.now()+30*60000).toISOString()});
+      if(!claim.length)continue;
       try{
         let output:any=null;
         if(task.task_key==="source.monitor"){output=await runWorkspaceSourceMonitor(workspace.id,16);result.source_monitor=output;}
@@ -38,10 +41,10 @@ export async function POST(req:Request){
         await sbUpdate("radar_recurring_tasks",`workspace_id=eq.${workspace.id}&task_key=eq.${encodeURIComponent(task.task_key)}`,{last_error:error instanceof Error?error.message.slice(0,500):"Task failed",next_run_at:new Date(Date.now()+minutes*60000).toISOString(),updated_at:new Date().toISOString()}).catch(()=>{});
       }
     }
-    if(!tasks.some((x:any)=>x.task_key==="source.monitor")) result.source_monitor=await runWorkspaceSourceMonitor(workspace.id,6);
+
     return NextResponse.json({ok:true,...result});
   }catch(error){
     if(error instanceof Error&&error.message==="UNAUTHORIZED")return NextResponse.json({error:"Unauthorized"},{status:401});
-    return NextResponse.json({error:error instanceof Error?error.message:"Maintenance failed"},{status:500});
+    return NextResponse.json({error:publicRadarError(error,"Maintenance failed")},{status:500});
   }
 }

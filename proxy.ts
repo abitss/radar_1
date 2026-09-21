@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
 const PUBLIC_PATHS = [
@@ -18,7 +19,7 @@ const LEGACY_REDIRECTS: Record<string,string> = {
   "/intelligence":"/market",
   "/brain":"/settings",
   "/sources":"/settings",
-  "/system-health":"/settings",
+
 };
 
 function harden(response: NextResponse) {
@@ -35,6 +36,11 @@ export function proxy(request: NextRequest) {
   if (pathname.startsWith("/_next/") || pathname === "/favicon.ico" || pathname.endsWith(".svg") || pathname.endsWith(".png")) return NextResponse.next();
   if (PUBLIC_PATHS.some(path => pathname === path || pathname.startsWith(`${path}/`))) return harden(NextResponse.next());
 
+  // These routes retain their own secret/workspace authorization.
+  if(pathname==="/api/radar/system-maintenance")return harden(NextResponse.next());
+  const supplied=request.headers.get("x-radar-api-key")||"";
+  const expected=process.env.RADAR_API_SECRET||"";
+  if(pathname.startsWith("/api/radar/")&&request.headers.get("x-radar-system-workspace")&&expected&&supplied&&Buffer.byteLength(supplied)===Buffer.byteLength(expected)&&timingSafeEqual(Buffer.from(supplied),Buffer.from(expected)))return harden(NextResponse.next());
   const session = request.cookies.get("radar_session")?.value;
   if (!session) {
     const url = request.nextUrl.clone();

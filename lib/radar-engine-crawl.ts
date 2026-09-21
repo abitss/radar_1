@@ -60,9 +60,28 @@ export function extractFeeds(html:string,baseUrl:string){
     const type=tag.match(/type=["']([^"']+)["']/i)?.[1]||"";
     const href=tag.match(/href=["']([^"']+)["']/i)?.[1];
     if(!href||!/(rss|atom|xml)/i.test(type))continue;
-    try{feeds.push(new URL(href,baseUrl).toString())}catch{}
+    try{const url=new URL(decodeEntities(href),baseUrl);if(["http:","https:"].includes(url.protocol))feeds.push(url.toString())}catch{}
   }
   return[...new Set(feeds)];
+}
+
+async function readBoundedBody(response:Response,maxBytes=2_000_000){
+  if(Number(response.headers.get("content-length"))>maxBytes)throw new Error("Source exceeds size limit");
+  if(!response.body)return "";
+  const reader=response.body.getReader(),decoder=new TextDecoder();let bytes=0,text="";
+  try{while(true){const {done,value}=await reader.read();if(done)break;bytes+=value.byteLength;if(bytes>maxBytes)throw new Error("Source exceeds size limit");text+=decoder.decode(value,{stream:true});}return text+decoder.decode();}
+  finally{await reader.cancel();}
+}
+
+export function feedToText(raw:string,baseUrl:string){
+  const entries=raw.match(/<(?:item|entry)\b[\s\S]*?<\/(?:item|entry)>/gi)||[];
+  return entries.slice(0,60).map(entry=>{
+    const title=entry.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||"";
+    const url=entry.match(/<link[^>]*href=["']([^"']+)["']/i)?.[1]||entry.match(/<link[^>]*>([\s\S]*?)<\/link>/i)?.[1]||"";
+    const summary=entry.match(/<(?:description|summary|content)[^>]*>([\s\S]*?)<\/(?:description|summary|content)>/i)?.[1]||"";
+    let link="";try{const parsed=new URL(decodeEntities(url.trim()),baseUrl);if(["http:","https:"].includes(parsed.protocol))link=parsed.toString();}catch{}
+    return `${htmlToText(title.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1"))} ${link} ${htmlToText(summary.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g,"$1"))}`.trim();
+  }).sort().join("\n");
 }
 
 async function fetchPage(url:string){
@@ -70,7 +89,7 @@ async function fetchPage(url:string){
   if(!response.ok)throw new Error(`HTTP ${response.status}`);
   const type=response.headers.get("content-type")||"";
   if(!type.includes("text")&&!type.includes("html")&&!type.includes("xml"))throw new Error(`Unsupported content type: ${type}`);
-  const raw=await response.text();
+  const raw=await readBoundedBody(response);
   return{url:response.url||url,title:extractTitle(raw),raw,text:htmlToText(raw).slice(0,30000)};
 }
 
@@ -101,8 +120,8 @@ export async function fetchSnapshotEngine(url:string){
   if(!response.ok)throw new Error(`HTTP ${response.status}`);
   const type=response.headers.get("content-type")||"";
   if(!type.includes("text")&&!type.includes("html")&&!type.includes("xml")&&!type.includes("json"))throw new Error(`Unsupported content type: ${type}`);
-  const raw=await response.text();
-  const text=htmlToText(raw).slice(0,60000);
+  const raw=await readBoundedBody(response);
+  const text=(/<(?:rss|feed)\b/i.test(raw)?feedToText(raw,response.url||url):htmlToText(raw)).slice(0,60000);
   return{text,hash:createHash("sha256").update(text).digest("hex"),title:extractTitle(raw),url:response.url||url};
 }
 

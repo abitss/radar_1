@@ -49,3 +49,14 @@ export async function sbDelete(table: string, query: string) {
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
+
+// Conflict handling is enforced by the existing database unique indexes.
+// Omitting founder-owned columns preserves them when discovered facts are merged.
+export async function sbUpsert(table:string, body:unknown, onConflict:string, ignore=false) {
+  const res=await fetch(`${SUPABASE_URL}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`,{
+    method:"POST",headers:headers({Prefer:`resolution=${ignore?"ignore":"merge"}-duplicates,return=representation`}),
+    body:JSON.stringify(body),cache:"no-store"
+  });
+  if(!res.ok)throw new Error(await res.text());
+  return res.json();
+}

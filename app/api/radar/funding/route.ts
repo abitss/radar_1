@@ -1,8 +1,9 @@
+import { fetchSnapshotEngine } from "@/lib/radar-engine-crawl";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { engineSearchWeb } from "@/lib/radar-engine-search";
 import { radarEngineAIConfigured, radarEngineJson } from "@/lib/radar-engine-ai";
-import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
+import { sbInsert, sbSelect, sbUpdate, sbUpsert } from "@/lib/radar-db";
 import { companyBrainReadiness, companyBrainSummary } from "@/lib/radar-profile";
 import { conciseDiscoveryTerms, cleanDiscoveryQuery } from "@/lib/radar-discovery-quality";
 import { workspaceForRequest } from "@/lib/radar-workspace";
@@ -56,7 +57,7 @@ function deadlineDate(raw:unknown){
   const m=text.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
   if(!m)return null;
   const d=new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);
-  if(Number.isNaN(d.getTime()))return null;
+  if(Number.isNaN(d.getTime())||d.toISOString().slice(0,10)!==m[0])return null;
   return `${m[1]}-${m[2]}-${m[3]}`;
 }
 function buildQueries(workspace:any,preferences:any){
@@ -150,6 +151,8 @@ export async function POST(req:Request){
     if(!readiness.ready)return NextResponse.json({error:`Complete the Company Brain first. Missing: ${readiness.missing.join(", ")}.`,company_brain:readiness},{status:400});
     if(!radarEngineAIConfigured())return NextResponse.json({error:"RADAR AI is not configured."},{status:503});
 
+    const recent=await sbSelect(`radar_funding_scans?workspace_id=eq.${workspace.id}&started_at=gte.${encodeURIComponent(new Date(Date.now()-15*60000).toISOString())}&status=in.(running,completed)&select=id&limit=1`);
+    if(recent.length)return NextResponse.json({error:"A funding scan ran recently. Please wait before scanning again.",cooldown:true},{status:429});
     const body:any=await req.json().catch(()=>({}));
     const requestedType=String(body?.type||"all").toLowerCase();
     const preferences={
@@ -161,15 +164,19 @@ export async function POST(req:Request){
     };
     const existingPref=await sbSelect(`radar_funding_preferences?workspace_id=eq.${workspace.id}&select=workspace_id&limit=1`).catch(()=>[]);
     const prefRow={funding_type:preferences.type,stage:preferences.stage||null,geography:preferences.geography||null,funding_goal:preferences.funding_goal||null,include_closed:preferences.include_closed,updated_at:new Date().toISOString()};
-    if(existingPref[0])await sbUpdate("radar_funding_preferences",`workspace_id=eq.${workspace.id}`,prefRow);
-    else await sbInsert("radar_funding_preferences",{workspace_id:workspace.id,...prefRow});
+    await sbUpsert("radar_funding_preferences",{workspace_id:workspace.id,...prefRow},"workspace_id");
 
     const queries=buildQueries(workspace,preferences);
     scan=(await sbInsert("radar_funding_scans",{workspace_id:workspace.id,status:"running",preferences,queries,started_at:new Date().toISOString()}))[0];
     const evidence=await collectEvidence(queries);
+    // Bound direct verification before AI; search snippets alone are leads.
+    await Promise.allSettled(evidence.slice(0,16).map(async source=>{
+      const page=await fetchSnapshotEngine(source.url);
+      source.description=page.text.slice(0,6000);source.direct_verified=true;
+    }));
     if(!evidence.length){
       const warning="No current public funding sources were returned by the configured search providers.";
-      await sbUpdate("radar_funding_scans",`id=eq.${scan.id}`,{status:"completed",evidence_count:0,opportunity_count:0,warning,finished_at:new Date().toISOString()});
+      await sbUpdate("radar_funding_scans",`id=eq.${scan.id}&workspace_id=eq.${scan.workspace_id}`,{status:"completed",evidence_count:0,opportunity_count:0,warning,finished_at:new Date().toISOString()});
       const stored=await sbSelect(`radar_funding_opportunities?workspace_id=eq.${workspace.id}&select=*&order=fit_score.desc,last_seen_at.desc&limit=300`).catch(()=>[]);
       return NextResponse.json({ok:true,opportunities:stored.map(serialize),stats:stats(stored),queries,evidence_count:0,warning,scan_id:scan.id,generated_at:new Date().toISOString(),duration_ms:Date.now()-started});
     }
@@ -187,19 +194,19 @@ PUBLIC-WEB EVIDENCE:
 ${JSON.stringify(evidence,null,2)}
 
 Return JSON exactly:
-{"opportunities":[{"name":"","organization":"","type":"grant|equity|accelerator|challenge|incubator|loan|other","status":"open|upcoming|rolling|unknown|closed","fit_score":0,"fit_reasons":[],"summary":"","amount":null,"equity":null,"deadline":null,"geography":null,"stage":null,"sector":null,"eligibility":[],"next_action":"","source_id":"e1"}]}
+{"opportunities":[{"name":"","organization":"","type":"grant|equity|accelerator|challenge|incubator|loan|other","status":"open|upcoming|rolling|unknown|closed","fit_score":0,"fit_reasons":[],"summary":"","amount":null,"equity":null,"deadline":null,"geography":null,"stage":null,"sector":null,"eligibility":[],"next_action":"","source_id":"e1","field_quotes":{"amount":null,"equity":null,"deadline":null,"geography":null,"stage":null,"status":null,"eligibility":[]}}]}
 
 Rules:
 - Personalize to this Company Brain. Do not return a generic funding directory.
 - Prefer OPEN, UPCOMING or ROLLING opportunities.
-- Never invent deadline, amount, equity terms, eligibility, geography, stage or status. Use null/unknown if unsupported.
+- Never invent deadline, amount, equity terms, eligibility, geography, stage or status. Use null/unknown if unsupported. For each factual field provide an exact supporting excerpt in field_quotes from the cited evidence. The field value must appear in that excerpt; eligibility quotes correspond to eligibility entries.
 - Every opportunity MUST cite exactly one supplied source_id supporting existence. Prefer official program/fund pages.
 - fit_score is startup-specific fit, not prestige.
 - Do not say the founder is eligible unless evidence establishes it. State what must be verified.
 - Deduplicate the same program/fund.
 - Return at most 24, highest fit first.`;
 
-    const analyzed=await radarEngineJson(prompt,{feature:"funding_match",web:true,maxTokens:5200,temperature:0.04});
+    const analyzed=await radarEngineJson(prompt,{feature:"funding_match",web:false,maxTokens:5200,temperature:0.04});
     const evidenceById=new Map(evidence.map((row:any)=>[String(row.id),row]));
     const raw=Array.isArray(analyzed.data?.opportunities)?analyzed.data.opportunities:[];
     const seen=new Set<string>(),now=new Date().toISOString();
@@ -209,7 +216,14 @@ Rules:
       const name=String(item?.name||"").replace(/\s+/g," ").trim().slice(0,240);
       const organization=String(item?.organization||"").replace(/\s+/g," ").trim().slice(0,200);
       if(!name||!organization)continue;
-      const availability=safeStatus(item?.status);
+      const supports=(field:string,value:any,quote:any=item?.field_quotes?.[field])=>{
+        const normalize=(x:any)=>String(x||"").toLowerCase().replace(/\s+/g," ").trim();
+        const q=normalize(quote),v=normalize(value);
+        return Boolean(source.direct_verified&&q.length>=8&&normalize(source.description).includes(q)&&v&&q.includes(v));
+      };
+      for(const field of ["amount","equity","deadline","geography","stage"]){if(!supports(field,item[field]))item[field]=null;}
+      item.eligibility=Array.isArray(item.eligibility)?item.eligibility.filter((v:any,i:number)=>supports("eligibility",v,item?.field_quotes?.eligibility?.[i])):[];
+      const availability=supports("status",item.status)?safeStatus(item.status):"unknown";
       if(availability==="closed"&&!preferences.include_closed)continue;
       const type=safeType(item?.type);
       if(preferences.type!=="all"&&preferences.type!==type)continue;
@@ -222,21 +236,21 @@ Rules:
         deadline_text:item?.deadline?String(item.deadline).slice(0,160):null,deadline_at:deadlineDate(item?.deadline),
         geography:item?.geography?String(item.geography).slice(0,200):null,stage:item?.stage?String(item.stage).slice(0,200):null,sector:item?.sector?String(item.sector).slice(0,200):null,
         eligibility:cleanArray(item?.eligibility,7),next_action:String(item?.next_action||"Review the official source and verify current eligibility before applying.").replace(/\s+/g," ").trim().slice(0,600),
-        source_url:String(source.url),source_title:String(source.title),source_domain:domain(String(source.url)),scan_preferences:preferences,last_seen_at:now,last_verified_at:now,updated_at:now
+        source_url:String(source.url),source_title:String(source.title),source_domain:domain(String(source.url)),scan_preferences:preferences,last_seen_at:now,last_verified_at:source.direct_verified?now:null,updated_at:now
       };
-      if(existing)await sbUpdate("radar_funding_opportunities",`id=eq.${existing.id}&workspace_id=eq.${workspace.id}`,row);
-      else await sbInsert("radar_funding_opportunities",{...row,pipeline_status:"new",first_seen_at:now});
+      await sbUpsert("radar_funding_opportunities",row,"workspace_id,fingerprint");
       persisted++;
       if(persisted>=24)break;
     }
 
     const stored=await sbSelect(`radar_funding_opportunities?workspace_id=eq.${workspace.id}&select=*&order=fit_score.desc,last_seen_at.desc&limit=300`);
-    await sbUpdate("radar_funding_scans",`id=eq.${scan.id}`,{status:"completed",evidence_count:evidence.length,opportunity_count:persisted,provider:analyzed.provider||null,model:analyzed.model||null,finished_at:new Date().toISOString()});
+    await sbUpdate("radar_funding_scans",`id=eq.${scan.id}&workspace_id=eq.${scan.workspace_id}`,{status:"completed",evidence_count:evidence.length,opportunity_count:persisted,provider:analyzed.provider||null,model:analyzed.model||null,finished_at:new Date().toISOString()});
     return NextResponse.json({ok:true,mode:"persistent-live-funding",profile:founderContext,preferences,queries,evidence_count:evidence.length,opportunities:stored.map(serialize),stats:stats(stored),provider:analyzed.provider,model:analyzed.model,scan_id:scan.id,generated_at:new Date().toISOString(),duration_ms:Date.now()-started});
   }catch(error){
-    if(scan?.id)await sbUpdate("radar_funding_scans",`id=eq.${scan.id}`,{status:"failed",error:error instanceof Error?error.message.slice(0,800):"Funding scan failed",finished_at:new Date().toISOString()}).catch(()=>{});
+    if(scan?.id)await sbUpdate("radar_funding_scans",`id=eq.${scan.id}&workspace_id=eq.${scan.workspace_id}`,{status:"failed",error:error instanceof Error?error.message.slice(0,800):"Funding scan failed",finished_at:new Date().toISOString()}).catch(()=>{});
     if(error instanceof Error&&error.message==="UNAUTHORIZED")return NextResponse.json({error:"Unauthorized"},{status:401});
-    return NextResponse.json({error:error instanceof Error?error.message:"Funding intelligence scan failed",duration_ms:Date.now()-started},{status:500});
+    console.error("RADAR funding scan failed",error);
+    return NextResponse.json({error:"Funding discovery could not finish. Your saved opportunities are unchanged; please retry later.",duration_ms:Date.now()-started},{status:500});
   }
 }
 

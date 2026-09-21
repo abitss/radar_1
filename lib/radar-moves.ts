@@ -15,7 +15,7 @@ export async function detectMovesForWorkspace(workspaceId:string){
   const competitors=await sbSelect(`radar_competitors?workspace_id=eq.${workspaceId}&select=id,name,website&limit=200`);
   let changed=0;
   for(const company of competitors){
-    const signals=await sbSelect(`radar_signals?workspace_id=eq.${workspaceId}&competitor_id=eq.${company.id}&select=*&order=observed_at.desc&limit=80`);
+    const signals=await sbSelect(`radar_signals?workspace_id=eq.${workspaceId}&competitor_id=eq.${company.id}&confidence=gte.60&observed_at=gte.${encodeURIComponent(new Date(Date.now()-30*86400000).toISOString())}&select=*&order=observed_at.desc&limit=80`);
     if(signals.length<2)continue;
     for(const pattern of PATTERNS){
       const matching=signals.filter((s:any)=>pattern.categories.includes(s.signal_type)||pattern.words.some((w:string)=>`${s.title||""} ${s.summary||""}`.toLowerCase().includes(w.trim()))).slice(0,12);
@@ -30,7 +30,7 @@ export async function detectMovesForWorkspace(workspaceId:string){
       const status=confidence>=85&&weights.categoryHits>=3?"confirmed":"watching";
       const existing=await sbSelect(`radar_moves?workspace_id=eq.${workspaceId}&competitor_id=eq.${company.id}&move_type=eq.${pattern.type}&status=in.(watching,confirmed)&select=*&order=updated_at.desc&limit=1`);
       let move:any;
-      if(existing[0]){const rows=await sbUpdate("radar_moves",`id=eq.${existing[0].id}`,{summary,rationale,confidence,impact_score:impact,status,last_evidence_at:matching[0]?.observed_at||new Date().toISOString(),updated_at:new Date().toISOString()});move=rows[0]||existing[0];}
+      if(existing[0]){const rows=await sbUpdate("radar_moves",`id=eq.${existing[0].id}&workspace_id=eq.${workspaceId}`,{summary,rationale,confidence,impact_score:impact,status,last_evidence_at:matching[0]?.observed_at||new Date().toISOString(),updated_at:new Date().toISOString()});move=rows[0]||existing[0];}
       else{const rows=await sbInsert("radar_moves",{workspace_id:workspaceId,competitor_id:company.id,move_type:pattern.type,title:pattern.title,summary,rationale,confidence,impact_score:impact,status,recommended_action:"Review the supporting evidence, compare it with your current strategy, and increase monitoring around the strongest confirming indicators.",last_evidence_at:matching[0]?.observed_at||new Date().toISOString()});move=rows[0];}
       if(move?.id){
         const linked=await sbSelect(`radar_move_signals?move_id=eq.${move.id}&select=signal_id`);const linkedSet=new Set(linked.map((x:any)=>x.signal_id));

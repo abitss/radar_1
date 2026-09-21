@@ -1,5 +1,6 @@
+import { publicRadarError } from "@/lib/radar-errors";
 import { NextResponse } from "next/server";
-import { engineSearchConfigured } from "@/lib/radar-engine-search";
+import { engineSearchConfigured, probeSearchProviders } from "@/lib/radar-engine-search";
 import { radarEngineAIStatus } from "@/lib/radar-engine-ai";
 import { companyBrainReadiness } from "@/lib/radar-profile";
 import { workspaceForRequest } from "@/lib/radar-workspace";
@@ -18,8 +19,8 @@ export async function GET(req: Request) {
       sbSelect(`radar_evidence?workspace_id=eq.${workspace.id}&select=id,competitor_id,source_url,confidence,observed_at&order=observed_at.desc&limit=1000`),
       sbSelect(`radar_briefings?workspace_id=eq.${workspace.id}&select=id,period,created_at&limit=100`),
       sbSelect(`radar_feedback?workspace_id=eq.${workspace.id}&select=id&limit=100`),
-      sbSelect(`radar_recurring_tasks?workspace_id=eq.${workspace.id}&select=task_key,next_run_at,last_completed_at&limit=50`).catch(()=>[]),
-      sbSelect(`radar_sources?workspace_id=eq.${workspace.id}&select=id,status,health,last_checked_at,next_check_at,competitor_id&limit=1000`).catch(()=>[]),
+      sbSelect(`radar_recurring_tasks?workspace_id=eq.${workspace.id}&select=task_key,next_run_at,last_completed_at,interval_minutes,last_error&limit=50`).catch(()=>[]),
+      sbSelect(`radar_sources?workspace_id=eq.${workspace.id}&select=id,status,source_type,health,last_checked_at,next_check_at,competitor_id&limit=1000`).catch(()=>[]),
     ]);
 
     const ai=radarEngineAIStatus();
@@ -48,8 +49,9 @@ export async function GET(req: Request) {
 
     const lastMonitorEvent=activeMonitors.map((m:any)=>m.last_event_at).filter(Boolean).sort().reverse()[0]||null;
     const recurringConfigured=tasks.length>0;
-    const providerMonitoringActive=Boolean(discovery)||entityMonitors.length>0;
-    const schedulingActive=providerMonitoringActive||recurringConfigured;
+    const recurringActive=tasks.some((t:any)=>t.task_key==="source.monitor"&&!t.last_error&&timeOf(t.last_completed_at)>Date.now()-Math.max(120,Number(t.interval_minutes)*2)*60000);
+    const schedulingActive=recurringActive;
+    const providerHealth=await probeSearchProviders();
 
     const checks=[
       {key:"workspace",label:"Founder Company Brain complete",done:brain.ready},
@@ -67,6 +69,9 @@ export async function GET(req: Request) {
     const completed=requiredChecks.filter((c:any)=>c.done).length;
 
     return NextResponse.json({
+      providers:providerHealth,
+      crawler:{status:"active",rss_sources:sources.filter((s:any)=>s.status==="active"&&["rss","atom"].includes(s.source_type)).length},
+      firecrawl:{status:process.env.FIRECRAWL_FALLBACK_ENABLED?.toLowerCase()!=="true"?"disabled":process.env.FIRECRAWL_API_KEY?"optional fallback":"unavailable"},
       company_brain:brain,
       website:{configured:Boolean(workspace.website),role:"optional_enrichment"},
       ai,
@@ -76,6 +81,8 @@ export async function GET(req: Request) {
         provider_monitor:Boolean(discovery),
         recurring_tasks:tasks.length,
         recurring_tasks_configured:recurringConfigured,
+        recurring_active:recurringActive,
+        last_completed_at:tasks.map((t:any)=>t.last_completed_at).filter(Boolean).sort().reverse()[0]||null,
         active_monitors:activeMonitors.length,
         entity_monitors:entityMonitors.length,
         schedule:discovery?.schedule_text||null,
@@ -107,6 +114,6 @@ export async function GET(req: Request) {
     });
   } catch (error) {
     if(error instanceof Error&&error.message==="UNAUTHORIZED")return NextResponse.json({error:"Unauthorized"},{status:401});
-    return NextResponse.json({error:error instanceof Error?error.message:"Status failed"},{status:500});
+    return NextResponse.json({error:publicRadarError(error,"Status failed")},{status:500});
   }
 }

@@ -1,6 +1,6 @@
 import { radarEngineText } from "@/lib/radar-engine-ai";
 
-export type EngineSearchResult={title:string;url:string;description:string;score:number;provider:string};
+export type EngineSearchResult={title:string;url:string;description:string;score:number;provider:string; publishedAt?:string|null; domain?:string; language?:string};
 
 function hasKey(provider:string){
   if(provider==="openrouter")return Boolean(process.env.OPENROUTER_API_KEY);
@@ -28,44 +28,86 @@ function firstPublicUrl(text:string){
   return null;
 }
 
+export function canonicalSearchUrl(raw:string) {
+  try {
+    const url=new URL(raw);
+    if(!["http:","https:"].includes(url.protocol)||url.username||url.password)return null;
+    const host=url.hostname.toLowerCase();
+    if(!host.includes(".")||host.endsWith(".local")||host.endsWith(".localhost")||/^\d+(?:\.\d+){3}$/.test(host))return null;
+    url.hash="";
+    for(const key of [...url.searchParams.keys()])if(/^(utm_|fbclid$|gclid$)/i.test(key))url.searchParams.delete(key);
+    url.searchParams.sort();
+    return url.toString();
+  } catch { return null; }
+}
 function dedupe(items:EngineSearchResult[]){
   const seen=new Set<string>();
-  return items.filter(item=>{
-    if(!item?.url||seen.has(item.url))return false;
-    seen.add(item.url);return true;
+  return items.flatMap(item=>{
+    const url=canonicalSearchUrl(item?.url);
+    if(!url||seen.has(url))return [];
+    seen.add(url);return [{...item,url}];
   });
 }
 
+type ProviderHealth={status:"reachable"|"degraded"; checked_at:string; results:number};
+const health=new Map<string,ProviderHealth>();
+const cache=new Map<string,{expires:number; rows:EngineSearchResult[]}>();
+const pending=new Map<string,Promise<EngineSearchResult[]>>();
+export function searchProviderHealth(){
+  return Object.fromEntries(["searxng","gdelt","openrouter","tavily","brave","serper"].map(provider=>{
+    const observation=health.get(provider);
+    const recent=observation&&Date.now()-Date.parse(observation.checked_at)<15*60*1000;
+    return [provider,{configured:hasKey(provider),status:!hasKey(provider)?"disabled":recent?observation.status:"not_checked",checked_at:observation?.checked_at||null,results:observation?.results??null}];
+  }));
+}
 export function configuredEngineSearchProvider(){
-  const requested=String(process.env.SEARCH_PROVIDER||"auto").toLowerCase();
-  if(requested&&requested!=="auto")return hasKey(requested)?requested:null;
-  for(const provider of ["searxng","tavily","brave","serper","openrouter"])if(hasKey(provider))return provider;
+  const requested=String(process.env.SEARCH_PROVIDER||"searxng").toLowerCase();
+  if(requested!=="auto"&&hasKey(requested))return requested;
+  for(const provider of ["searxng","gdelt","tavily","brave","serper","openrouter"])if(hasKey(provider))return provider;
   return null;
 }
-
-export function engineSearchConfigured(){
-  return Boolean(configuredEngineSearchProvider()||process.env.OPENROUTER_API_KEY||String(process.env.GDELT_ENABLED||"true").toLowerCase()!=="false");
+export function engineSearchConfigured(){return Boolean(configuredEngineSearchProvider());}
+const providers:Record<string,(query:string,limit:number)=>Promise<EngineSearchResult[]>>={searxng:searchSearxng,gdelt:searchGdelt,openrouter:searchOpenRouter,tavily:searchTavily,brave:searchBrave,serper:searchSerper};
+async function runProvider(name:string,query:string,limit:number){
+  try {
+    const rows=await providers[name](query,limit);
+    health.set(name,{status:"reachable",checked_at:new Date().toISOString(),results:rows.length});
+    return rows;
+  } catch(error) {
+    health.set(name,{status:"degraded",checked_at:new Date().toISOString(),results:0});
+    console.error(`RADAR discovery provider ${name} failed`,error);
+    return [];
+  }
 }
-
+export async function probeSearchProviders(){
+  await Promise.all(["searxng","gdelt"].filter(name=>hasKey(name)&&(!health.get(name)||Date.now()-Date.parse(health.get(name)!.checked_at)>5*60*1000)).map(name=>runProvider(name,"startup funding",3)));
+  return searchProviderHealth();
+}
 export async function engineSearchWeb(query:string,maxResults=8):Promise<EngineSearchResult[]>{
+  query=String(query||"").replace(/\s+/g," ").trim().slice(0,220);
+  if(!query)return [];
+  maxResults=Math.max(1,Math.min(20,Math.floor(maxResults)||8));
   const provider=configuredEngineSearchProvider();
-  const supplemental=Boolean(process.env.OPENROUTER_API_KEY)&&String(process.env.OPENROUTER_LIVE_WEB_ENABLED||"true").toLowerCase()!=="false";
-  const tasks:Promise<EngineSearchResult[]>[]=[];
-
-  if(provider==="searxng")tasks.push(searchSearxng(query,maxResults));
-  else if(provider==="tavily")tasks.push(searchTavily(query,maxResults));
-  else if(provider==="brave")tasks.push(searchBrave(query,maxResults));
-  else if(provider==="serper")tasks.push(searchSerper(query,maxResults));
-  else if(provider==="openrouter")tasks.push(searchOpenRouter(query,maxResults));
-
-  if(String(process.env.GDELT_ENABLED||"true").toLowerCase()!=="false")tasks.push(searchGdelt(query,Math.min(maxResults,8)));
-  if(supplemental&&provider!=="openrouter")tasks.push(searchOpenRouter(query,Math.min(maxResults,6)));
-  if(!tasks.length)return[];
-
-  const settled=await Promise.allSettled(tasks);
-  const rows:EngineSearchResult[]=[];
-  for(const item of settled)if(item.status==="fulfilled")rows.push(...item.value);
-  return dedupe(rows).slice(0,Math.max(maxResults,Math.min(maxResults*2,16)));
+  const live=hasKey("openrouter")&&process.env.OPENROUTER_LIVE_WEB_ENABLED?.toLowerCase()==="true";
+  const key=JSON.stringify([provider,process.env.SEARXNG_BASE_URL,hasKey("gdelt"),live,query,maxResults]);
+  const hit=cache.get(key);if(hit&&hit.expires>Date.now())return hit.rows;
+  if(pending.has(key))return pending.get(key)!;
+  const work=(async()=>{
+    const selected=new Set<string>();
+    if(provider&&provider!=="openrouter")selected.add(provider);
+    if(hasKey("gdelt"))selected.add("gdelt");
+    if(provider==="openrouter"&&live)selected.add(provider);
+    let rows=(await Promise.all([...selected].map(name=>runProvider(name,query,maxResults)))).flat();
+    if(!rows.length&&live&&!selected.has("openrouter"))rows=await runProvider("openrouter",query,maxResults);
+    rows=dedupe(rows).slice(0,Math.min(maxResults*2,20));
+    if(rows.length){
+      if(cache.size>=200)cache.delete(cache.keys().next().value!);
+      cache.set(key,{expires:Date.now()+5*60*1000,rows});
+    }
+    return rows;
+  })();
+  pending.set(key,work);
+  try{return await work;}finally{pending.delete(key);}
 }
 
 async function searchOpenRouter(query:string,maxResults:number):Promise<EngineSearchResult[]>{
@@ -134,7 +176,9 @@ async function searchSearxng(query:string,maxResults:number):Promise<EngineSearc
   const response=await fetch(url,{headers:{accept:"application/json","user-agent":"RADAR/1.0"},signal:AbortSignal.timeout(Number(process.env.SEARCH_TIMEOUT_MS||30000)),cache:"no-store"});
   if(!response.ok)throw new Error(`SearXNG search failed (${response.status})`);
   const data:any=await response.json();
-  return (Array.isArray(data?.results)?data.results:[]).slice(0,maxResults).map((r:any,index:number)=>({
+  if(!Array.isArray(data?.results))throw new Error("SearXNG returned an invalid search response");
+  if(!data.results.length&&data.unresponsive_engines?.length)throw new Error("SearXNG engines are temporarily unavailable");
+  return data.results.slice(0,maxResults).map((r:any,index:number)=>({
     title:String(r.title||r.url||"").slice(0,240),
     url:String(r.url||""),
     description:String(r.content||r.description||"").replace(/\s+/g," ").trim().slice(0,2400),
@@ -143,12 +187,18 @@ async function searchSearxng(query:string,maxResults:number):Promise<EngineSearc
   })).filter((r:EngineSearchResult)=>Boolean(r.url));
 }
 
+let gdeltQueue:Promise<void>=Promise.resolve();
+let gdeltNextAt=0;
 async function searchGdelt(query:string,maxResults:number):Promise<EngineSearchResult[]>{
+  // GDELT asks clients to issue no more than one request every five seconds.
+  const slot=gdeltQueue.then(async()=>{const wait=Math.max(0,gdeltNextAt-Date.now());if(wait)await new Promise(resolve=>setTimeout(resolve,wait));gdeltNextAt=Date.now()+5100;});
+  gdeltQueue=slot.catch(()=>{});await slot;
   const endpoint="https://api.gdeltproject.org/api/v2/doc/doc";
   const params=new URLSearchParams({query,mode:"artlist",maxrecords:String(Math.min(250,Math.max(5,maxResults))),format:"json",sort:"hybridrel"});
   const response=await fetch(`${endpoint}?${params.toString()}`,{headers:{accept:"application/json","user-agent":"RADAR/1.0"},signal:AbortSignal.timeout(Number(process.env.SEARCH_TIMEOUT_MS||30000)),cache:"no-store"});
-  if(!response.ok)return[];
-  const data:any=await response.json().catch(()=>({}));
+  if(!response.ok)throw new Error(`GDELT search failed (${response.status})`);
+  const data:any=await response.json();
+  if(!Array.isArray(data?.articles))throw new Error("GDELT returned an invalid article response");
   const rows=Array.isArray(data?.articles)?data.articles:[];
   return rows.slice(0,maxResults).map((r:any,index:number)=>({
     title:String(r.title||r.url||"").slice(0,240),
@@ -156,5 +206,7 @@ async function searchGdelt(query:string,maxResults:number):Promise<EngineSearchR
     description:String([r.seendate,r.domain,r.sourcecountry,r.language].filter(Boolean).join(" · ")).slice(0,1200),
     score:Math.max(.3,.9-index*.04),
     provider:"gdelt",
+    publishedAt:/^\d{8}T\d{6}Z$/.test(String(r.seendate||""))?String(r.seendate).replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/,"$1-$2-$3T$4:$5:$6Z"):null,
+    domain:String(r.domain||""),language:String(r.language||""),
   })).filter((r:EngineSearchResult)=>Boolean(r.url));
 }

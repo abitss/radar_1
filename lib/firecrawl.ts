@@ -1,9 +1,10 @@
+import { fetchSnapshotEngine } from "@/lib/radar-engine-crawl";
 import { engineSearchConfigured, engineSearchWeb } from "@/lib/radar-engine-search";
 
 const FIRECRAWL_BASE = "https://api.firecrawl.dev/v2";
 
 export function firecrawlConfigured() {
-  return Boolean(process.env.FIRECRAWL_API_KEY);
+  return Boolean(process.env.FIRECRAWL_API_KEY) && process.env.FIRECRAWL_FALLBACK_ENABLED?.toLowerCase() === "true";
 }
 
 function apiKey() {
@@ -22,6 +23,7 @@ function isFirecrawlQuotaError(error:unknown){
 }
 
 async function firecrawlRequest(path: string, body: unknown, timeoutMs = 30000) {
+  if (!firecrawlConfigured()) throw new Error("Premium crawler fallback is disabled.");
   const response = await fetch(`${FIRECRAWL_BASE}${path}`, {
     method: "POST",
     headers: {
@@ -100,48 +102,26 @@ async function oldEngineRows(query:string,limit:number):Promise<FirecrawlSearchR
 }
 
 export async function searchWebFast(query: string, limit = 5): Promise<FirecrawlSearchResult[]> {
-  const tasks:Promise<FirecrawlSearchResult[]>[]=[];
-  if(firecrawlConfigured())tasks.push(firecrawlRequest("/search", {query,limit,sources:["web"],ignoreInvalidURLs:true}, 18000).then(searchRows));
-  tasks.push(oldEngineRows(query,limit));
-  const settled=await Promise.allSettled(tasks);
-  const fireIndex=firecrawlConfigured()?0:-1;
-  const fire=fireIndex>=0&&settled[fireIndex]?.status==="fulfilled"?(settled[fireIndex] as PromiseFulfilledResult<FirecrawlSearchResult[]>).value:[];
-  const engineResult=settled[settled.length-1];
-  const engine=engineResult?.status==="fulfilled"?engineResult.value:[];
-  if(!fire.length&&!engine.length&&fireIndex>=0&&settled[fireIndex]?.status==="rejected"){
-    const error=(settled[fireIndex] as PromiseRejectedResult).reason;
-    if(!isTransientFirecrawlError(error)&&!isFirecrawlQuotaError(error)&&!engineSearchConfigured())throw error;
-  }
-  return mergeSearchRows(fire,engine,Math.max(limit,Math.min(limit*2,12)));
+  return searchWeb(query, limit);
 }
 
 export async function searchWeb(query: string, limit = 6): Promise<FirecrawlSearchResult[]> {
-  const tasks:Promise<FirecrawlSearchResult[]>[]=[];
-  if(firecrawlConfigured())tasks.push(firecrawlRequest("/search", {
-    query,
-    limit,
-    sources: ["web"],
-    ignoreInvalidURLs: true,
-    scrapeOptions: {
-      formats: ["markdown"],
-      onlyMainContent: true,
-      maxAge: 21600000,
-    },
-  }, 30000).then(searchRows));
-  tasks.push(oldEngineRows(query,limit));
-  const settled=await Promise.allSettled(tasks);
-  const fireIndex=firecrawlConfigured()?0:-1;
-  const fire=fireIndex>=0&&settled[fireIndex]?.status==="fulfilled"?(settled[fireIndex] as PromiseFulfilledResult<FirecrawlSearchResult[]>).value:[];
-  const engineResult=settled[settled.length-1];
-  const engine=engineResult?.status==="fulfilled"?engineResult.value:[];
-  if(!fire.length&&!engine.length&&fireIndex>=0&&settled[fireIndex]?.status==="rejected"){
-    const error=(settled[fireIndex] as PromiseRejectedResult).reason;
-    if(!isTransientFirecrawlError(error)&&!isFirecrawlQuotaError(error)&&!engineSearchConfigured())throw error;
+  const rows = await oldEngineRows(query, limit);
+  if (rows.length || !firecrawlConfigured()) return rows;
+  try {
+    return searchRows(await firecrawlRequest("/search", {query, limit, sources:["web"]}, 18000));
+  } catch (error) {
+    console.error("RADAR optional crawler search unavailable", error);
+    return [];
   }
-  return mergeSearchRows(fire,engine,Math.max(limit,Math.min(limit*2,16)));
 }
 
 export async function scrapeUrl(url:string) {
+  try {
+    const page = await fetchSnapshotEngine(url);
+    if (page.text.length >= 80) return {url:page.url, title:page.title, markdown:page.text, metadata:{provider:"direct"}};
+  } catch (error) { console.error("RADAR direct fetch unavailable", error); }
+
   const payload = await firecrawlRequest("/scrape", {
     url,
     formats: ["markdown"],

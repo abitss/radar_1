@@ -1,3 +1,4 @@
+import { publicRadarError } from "@/lib/radar-errors";
 import { NextResponse } from "next/server";
 import { createMonitor, firecrawlConfigured } from "@/lib/firecrawl";
 import { sbInsert, sbSelect } from "@/lib/radar-db";
@@ -68,14 +69,15 @@ export async function POST(req: Request) {
     const body:any=await req.json().catch(()=>({}));
     await scheduleWorkspaceRecurringTasks(workspace.id);
     const current = await sbSelect(`radar_monitors?workspace_id=eq.${workspace.id}&monitor_type=eq.web_discovery&status=eq.active&select=*&limit=1`);
-    if (current[0]) return NextResponse.json({ ok:true, mode:"provider", monitor:current[0], alreadyActive:true, provider_monitor:true, local_recurring:true });
+
 
     const explicitProvider=body?.provider==="firecrawl"||body?.activateProvider===true;
     if(!explicitProvider){
-      return NextResponse.json({ok:true,mode:"local_recurring",provider_monitor:false,local_recurring:true,degraded:false,message:"Continuous discovery is running through RADAR recurring search without consuming Firecrawl monitor credits."});
+      return NextResponse.json({ok:true,mode:"local_recurring",provider_monitor:false,local_recurring:true,degraded:false,message:"Continuous discovery is scheduled through RADAR recurring search. Check System Health for recent execution."});
     }
     if (!firecrawlConfigured()) return NextResponse.json({ok:true,mode:"local_recurring",provider_monitor:false,local_recurring:true,degraded:true,message:"Firecrawl is unavailable; RADAR is using recurring engine search instead."});
 
+    if(current[0])return NextResponse.json({ok:true,mode:"provider",monitor:current[0],alreadyActive:true,local_recurring:true});
     const origin = new URL(req.url).origin;
     await ensureSystemHeartbeat(workspace.id,origin).catch(()=>null);
     let expansion:any=null;

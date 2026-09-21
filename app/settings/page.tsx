@@ -35,7 +35,7 @@ export default function SettingsPage(){
     }catch(error){setMessage(error instanceof Error?error.message:"Action failed")}finally{setBusy(false)}
   }
 
-  return <div className="content">
+  return <div className="content"><a href="/system-health">View live System Health</a>
     <PageIntro eyebrow="WORKSPACE CONTROL" title="Settings" description="Your Company Brain determines what RADAR considers relevant. Monitoring, AI and beta readiness show whether the intelligence stack is truly usable."/>
     <section className="founder-two-col" style={{marginBottom:13}}>
       <article className="panel founder-panel">

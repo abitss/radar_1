@@ -33,6 +33,7 @@ function ipBlocked(ip:string){
 
 export async function assertSafePublicUrl(input:string){
   const url=normalizeEngineUrl(input);
+  if(url.username||url.password)throw new Error("Credentials in source URLs are not allowed");
   const host=url.hostname.toLowerCase();
   if(host==="localhost"||host.endsWith(".localhost")||host.endsWith(".local")||host==="metadata.google.internal")throw new Error("Private or local network targets are not allowed");
   const records=await dns.lookup(host,{all:true});

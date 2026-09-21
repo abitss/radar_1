@@ -1,6 +1,7 @@
+import { publicRadarError } from "@/lib/radar-errors";
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { scrapeCompanyProfile } from "@/lib/firecrawl";
+import { scrapeCompanyProfile, firecrawlConfigured } from "@/lib/firecrawl";
 import { crawlStartupEngine, sourceTypeForUrl } from "@/lib/radar-engine-crawl";
 import { analyzeCompanyProfileFromEvidence } from "@/lib/radar-ultimate-ai";
 import { sbInsert, sbSelect, sbUpdate } from "@/lib/radar-db";
@@ -35,9 +36,11 @@ export async function POST(req:Request){
       profile=await analyzeCompanyProfileFromEvidence(website,crawl.combinedText);
     }catch(error){
       directError=error instanceof Error?error.message:"Direct first-party crawl failed";
-      profileSource="firecrawl_fallback";
-      const scraped=await scrapeCompanyProfile(website);
-      profile=scraped?.json||scraped?.data?.json||{};
+      console.error("RADAR optional website enrichment unavailable",error);
+      if(firecrawlConfigured()){
+        profileSource="firecrawl_fallback";
+        try{const scraped=await scrapeCompanyProfile(website);profile=scraped?.json||scraped?.data?.json||{};}catch{profileSource="unavailable";}
+      }else profileSource="unavailable";
     }
 
     // Website enrichment must be additive. Never erase founder-provided Company Brain
@@ -110,9 +113,9 @@ export async function POST(req:Request){
       }
     }
 
-    return NextResponse.json({ok:true,workspace:updated[0],source:website,engine:{profile_source:profileSource,first_party_pages:crawl?.pages?.length||0,feeds:crawl?.feeds?.length||0,sources_added:sourcesAdded,snapshots_added:snapshotsAdded,direct_error:directError||null}});
+    return NextResponse.json({ok:true,workspace:updated[0],source:website,engine:{profile_source:profileSource,first_party_pages:crawl?.pages?.length||0,feeds:crawl?.feeds?.length||0,sources_added:sourcesAdded,snapshots_added:snapshotsAdded,warning:directError?"Website enrichment was incomplete. Your existing Company Brain was preserved.":null}});
   }catch(error){
     if(error instanceof Error&&error.message==="UNAUTHORIZED")return NextResponse.json({error:"Unauthorized"},{status:401});
-    return NextResponse.json({error:error instanceof Error?error.message:"Could not understand startup website"},{status:500});
+    return NextResponse.json({error:publicRadarError(error,"Could not understand startup website")},{status:500});
   }
 }
