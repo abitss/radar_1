@@ -16,6 +16,10 @@ function isTransientFirecrawlError(error:unknown){
   const message=error instanceof Error?error.message:String(error||"");
   return /(rate limit|too many requests|\b429\b|retry after|timeout|timed out|fetch failed|econnreset|etimedout|temporarily unavailable|\b502\b|\b503\b|\b504\b)/i.test(message);
 }
+function isFirecrawlQuotaError(error:unknown){
+  const message=error instanceof Error?error.message:String(error||"");
+  return /(insufficient credits|more credits|upgrade your plan|credit balance|credits exhausted|billing)/i.test(message);
+}
 
 async function firecrawlRequest(path: string, body: unknown, timeoutMs = 30000) {
   const response = await fetch(`${FIRECRAWL_BASE}${path}`, {
@@ -106,7 +110,7 @@ export async function searchWebFast(query: string, limit = 5): Promise<Firecrawl
   const engine=engineResult?.status==="fulfilled"?engineResult.value:[];
   if(!fire.length&&!engine.length&&fireIndex>=0&&settled[fireIndex]?.status==="rejected"){
     const error=(settled[fireIndex] as PromiseRejectedResult).reason;
-    if(!isTransientFirecrawlError(error))throw error;
+    if(!isTransientFirecrawlError(error)&&!isFirecrawlQuotaError(error)&&!engineSearchConfigured())throw error;
   }
   return mergeSearchRows(fire,engine,Math.max(limit,Math.min(limit*2,12)));
 }
@@ -132,7 +136,7 @@ export async function searchWeb(query: string, limit = 6): Promise<FirecrawlSear
   const engine=engineResult?.status==="fulfilled"?engineResult.value:[];
   if(!fire.length&&!engine.length&&fireIndex>=0&&settled[fireIndex]?.status==="rejected"){
     const error=(settled[fireIndex] as PromiseRejectedResult).reason;
-    if(!isTransientFirecrawlError(error))throw error;
+    if(!isTransientFirecrawlError(error)&&!isFirecrawlQuotaError(error)&&!engineSearchConfigured())throw error;
   }
   return mergeSearchRows(fire,engine,Math.max(limit,Math.min(limit*2,16)));
 }
