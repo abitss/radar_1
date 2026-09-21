@@ -42,7 +42,9 @@ export default function FundingPage(){
       setWorkspace(w);setRows(Array.isArray(f?.opportunities)?f.opportunities:[]);setStats(f?.stats||null);setScans(Array.isArray(f?.scans)?f.scans:[]);
       const p=f?.preferences;
       setType(p?.funding_type||"all");setStage(p?.stage||"");setGeography(p?.geography||w?.geography||w?.founder_country||"");
-      setGoal(p?.funding_goal||w?.founder_goal||"");setIncludeClosed(Boolean(p?.include_closed));setError("");
+      const storedGoal=String(p?.funding_goal||"").trim();
+      const founderGoal=String(w?.founder_goal||"").trim();
+      setGoal(storedGoal&&storedGoal!==founderGoal?storedGoal:"");setIncludeClosed(Boolean(p?.include_closed));setError("");
       if(!silent&&f?.last_scan?.warning)setMessage(f.last_scan.warning);
     }catch(e){if(!silent)setError(e instanceof Error?e.message:"Could not load funding intelligence")}
     finally{if(!silent)setLoading(false)}
