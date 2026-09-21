@@ -49,8 +49,8 @@ function routeModel(feature="unknown"){
   const fast=["semantic","profile","extract","classify","repair","dedupe","triage"].some(x=>f.includes(x));
   if(provider()==="openrouter"){
     if(reasoning)return process.env.OPENROUTER_MODEL_REASONING||process.env.RADAR_AI_MODEL_REASONING||"deepseek/deepseek-r1-0528";
-    if(fast)return process.env.OPENROUTER_MODEL_FAST||process.env.RADAR_AI_MODEL_FAST||"deepseek/deepseek-v3.2";
-    return process.env.OPENROUTER_MODEL_STANDARD||process.env.RADAR_AI_MODEL_STANDARD||"deepseek/deepseek-v3.2";
+    if(fast)return process.env.OPENROUTER_MODEL_FAST||process.env.RADAR_AI_MODEL_FAST||"deepseek/deepseek-chat";
+    return process.env.OPENROUTER_MODEL_STANDARD||process.env.RADAR_AI_MODEL_STANDARD||"deepseek/deepseek-chat";
   }
   if(reasoning)return process.env.RADAR_AI_MODEL_REASONING||process.env.AI_MODEL_REASONING||process.env.RADAR_AI_MODEL||process.env.AI_MODEL||null;
   if(fast)return process.env.RADAR_AI_MODEL_FAST||process.env.AI_MODEL_FAST||process.env.RADAR_AI_MODEL||process.env.AI_MODEL||null;
@@ -59,12 +59,12 @@ function routeModel(feature="unknown"){
 
 function openRouterModels(feature:string|undefined,explicit?:string){
   if(explicit)return[explicit];
-  const primary=routeModel(feature||"unknown")||"deepseek/deepseek-v3.2";
+  const primary=routeModel(feature||"unknown")||"deepseek/deepseek-chat";
   const f=String(feature||"").toLowerCase();
   const reasoning=["ask","decision","competitor","market","move","landscape","briefing","strategy"].some(x=>f.includes(x));
   const configured=String(reasoning?process.env.OPENROUTER_FALLBACK_MODELS_REASONING||"":process.env.OPENROUTER_FALLBACK_MODELS||"")
     .split(",").map(x=>x.trim()).filter(Boolean);
-  const defaults=reasoning?["deepseek/deepseek-v3.2","google/gemini-3.8-flash","openai/gpt-5.4"]:["deepseek/deepseek-v3.2","openai/gpt-oss-20b"];
+  const defaults=reasoning?["deepseek/deepseek-chat","google/gemini-3.8-flash","openai/gpt-5.4"]:["deepseek/deepseek-chat","openai/gpt-oss-20b"];
   return Array.from(new Set([primary,...configured,...defaults])).slice(0,4);
 }
 
@@ -170,8 +170,8 @@ export async function radarEngineOpenRouterHealth(){
     if(!res.ok)return{configured:true,authenticated:false,status:res.status,error:String(keyInfo?.error?.message||keyInfo?.message||"OpenRouter key validation failed")};
   }catch(error){return{configured:true,authenticated:false,error:error instanceof Error?error.message:"OpenRouter key validation failed"}}
   try{
-    const data=await openRouterRequest({model:"deepseek/deepseek-v3.2",messages:[{role:"user",content:"Return exactly RADAR_OPENROUTER_OK"}],temperature:0,max_tokens:64},30000);
-    return{configured:true,authenticated:true,completion_ok:String(data?.choices?.[0]?.message?.content||"").includes("RADAR_OPENROUTER_OK"),model:String(data?.model||"deepseek/deepseek-v3.2"),usage:keyInfo?.data?.usage??keyInfo?.usage??null,limit_remaining:keyInfo?.data?.limit_remaining??keyInfo?.limit_remaining??null};
+    const data=await openRouterRequest({model:"deepseek/deepseek-chat",messages:[{role:"user",content:"Return exactly RADAR_OPENROUTER_OK"}],temperature:0,max_tokens:64},30000);
+    return{configured:true,authenticated:true,completion_ok:String(data?.choices?.[0]?.message?.content||"").includes("RADAR_OPENROUTER_OK"),model:String(data?.model||"deepseek/deepseek-chat"),usage:keyInfo?.data?.usage??keyInfo?.usage??null,limit_remaining:keyInfo?.data?.limit_remaining??keyInfo?.limit_remaining??null};
   }catch(error){return{configured:true,authenticated:true,completion_ok:false,error:error instanceof Error?error.message:"OpenRouter completion failed",usage:keyInfo?.data?.usage??keyInfo?.usage??null,limit_remaining:keyInfo?.data?.limit_remaining??keyInfo?.limit_remaining??null}}
 }
 
