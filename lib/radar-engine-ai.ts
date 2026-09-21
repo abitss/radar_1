@@ -121,7 +121,7 @@ async function callOpenRouter(prompt:string,options:EngineAiOptions):Promise<Eng
     max_tokens:options.maxTokens??3200,
   };
   if(options.json)body.response_format={type:"json_object"};
-  if(options.web){
+  if(options.web&&process.env.OPENROUTER_LIVE_WEB_ENABLED?.toLowerCase()==="true"){
     const maxResults=Math.max(5,Math.min(20,Number(process.env.OPENROUTER_WEB_MAX_RESULTS||10)));
     if(String(options.feature||"").toLowerCase().includes("live_web_discovery")){
       body.plugins=[{id:"web",max_results:maxResults}];
@@ -132,7 +132,15 @@ async function callOpenRouter(prompt:string,options:EngineAiOptions):Promise<Eng
       ];
     }
   }
-  const data=await openRouterRequest(body,Number(process.env.AI_TIMEOUT_MS||75000));
+  let data:any;
+  try{data=await openRouterRequest(body,Number(process.env.AI_TIMEOUT_MS||75000));}
+  catch(error){
+    const status=(error as {status?:number}).status;
+    if(![400,404].includes(Number(status))||options.model)throw error;
+    // Retry one known default when a configured model identifier is unavailable.
+    const fallback={...body,model:"deepseek/deepseek-chat"};delete fallback.models;
+    data=await openRouterRequest(fallback,Number(process.env.AI_TIMEOUT_MS||75000));
+  }
   const text=String(data?.choices?.[0]?.message?.content||"");
   return{text,provider:"openrouter",model:String(data?.model||models[0]),usage:{input:data?.usage?.prompt_tokens??null,output:data?.usage?.completion_tokens??null},citations:collectCitations(data)};
 }
@@ -184,7 +192,7 @@ export function radarEngineAIConfigured(){
 
 export function radarEngineAIStatus(){
   const p=provider();
-  return{provider:p,configured:radarEngineAIConfigured(),openrouter_key_present:Boolean(openRouterKey()),fast:routeModel("semantic_change"),standard:routeModel("company_profile"),reasoning:routeModel("market_strategy"),live_web:p==="openrouter"&&Boolean(openRouterKey())};
+  return{provider:p,configured:radarEngineAIConfigured(),openrouter_key_present:Boolean(openRouterKey()),fast:routeModel("semantic_change"),standard:routeModel("company_profile"),reasoning:routeModel("market_strategy"),live_web:p==="openrouter"&&Boolean(openRouterKey())&&process.env.OPENROUTER_LIVE_WEB_ENABLED?.toLowerCase()==="true"};
 }
 
 export async function radarEngineText(prompt:string,options:EngineAiOptions={}):Promise<EngineAiResult>{

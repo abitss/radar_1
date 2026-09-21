@@ -65,3 +65,9 @@ test('middleware permits authenticated workers and preserves user authentication
  const page=proxy(new NextRequest('https://radar.example.com/system-health'));assert.equal(page.status,307);
  const cron=proxy(new NextRequest('https://radar.example.com/api/radar/system-maintenance'));assert.equal(cron.headers.get('x-middleware-next'),'1');
 });
+test('AI reasoning does not enable paid web tools and retries an unavailable configured model',async()=>{
+ process.env.OPENROUTER_API_KEY='test';delete process.env.OPENROUTER_LIVE_WEB_ENABLED;
+ const bodies=[];global.fetch=async (url,options)=>{bodies.push(JSON.parse(options.body));return bodies.length===1?new Response(JSON.stringify({error:{message:'model not available'}}),{status:404}):response({model:'deepseek/deepseek-chat',choices:[{message:{content:'Evidence summary'}}]});};
+ const ai=require('../lib/radar-engine-ai.ts');const result=await ai.radarEngineText('Summarize stored evidence',{feature:'briefing_daily',web:true});
+ assert.equal(result.text,'Evidence summary');assert.equal(bodies.length,2);assert.equal(bodies[1].model,'deepseek/deepseek-chat');assert.ok(bodies.every(b=>!b.tools&&!b.plugins));
+});
