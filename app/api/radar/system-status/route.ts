@@ -49,7 +49,7 @@ export async function GET(req: Request) {
     const lastMonitorEvent=activeMonitors.map((m:any)=>m.last_event_at).filter(Boolean).sort().reverse()[0]||null;
     const recurringConfigured=tasks.length>0;
     const providerMonitoringActive=Boolean(discovery)||entityMonitors.length>0;
-    const schedulingActive=providerMonitoringActive;
+    const schedulingActive=providerMonitoringActive||recurringConfigured;
 
     const checks=[
       {key:"workspace",label:"Founder Company Brain complete",done:brain.ready},
@@ -57,7 +57,7 @@ export async function GET(req: Request) {
       {key:"competitors",label:"Relevant competitor universe",done:competitors.length>0},
       {key:"verified",label:"At least one first-party verified competitor",done:verified>0},
       {key:"source_coverage",label:"Evidence/source coverage",done:evidence.some((e:any)=>Boolean(e.source_url))},
-      {key:"monitoring",label:"Continuous provider monitoring active",done:providerMonitoringActive},
+      {key:"monitoring",label:"Continuous monitoring active",done:schedulingActive},
       {key:"signals",label:"Structured signals available",done:signals.length>0},
       {key:"weekly_brief",label:"Weekly briefing generated",done:briefings.some((b:any)=>b.period==="weekly")},
       {key:"ask",label:"Ask RADAR intelligence layer",done:Boolean(ai.configured)},
@@ -103,7 +103,7 @@ export async function GET(req: Request) {
         running_items:runningScans.slice(0,5),
       },
       beta:{checks,completed,total:requiredChecks.length,percent:Math.round((completed/Math.max(1,requiredChecks.length))*100)},
-      launch_ready:Boolean(brain.ready&&ai.configured&&competitors.length>0&&providerMonitoringActive),
+      launch_ready:Boolean(brain.ready&&ai.configured&&competitors.length>0&&schedulingActive),
     });
   } catch (error) {
     if(error instanceof Error&&error.message==="UNAUTHORIZED")return NextResponse.json({error:"Unauthorized"},{status:401});
